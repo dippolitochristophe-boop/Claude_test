@@ -1,5 +1,5 @@
 """
-Job Scraper v10
+Job Scraper v11
 
 INSTALLATION (une seule fois) :
     pip install playwright requests beautifulsoup4
@@ -178,13 +178,8 @@ SITES = [
         "pages": ["https://www.statkraft.com/careers/open-positions/"],
         "job_pattern": "/careers/jobs/",
     },
-    {
-        "name": "BP",
-        "type": "html",
-        "pages": ["https://careers.bp.com/global/en/search-results?keywords=power+trading+energy+risk"],
-        "job_pattern": "/global/en/job/",
-    },
-    # TotalEnergies → Taleo (voir scrape_totalenergies())
+    # BP → Workday (voir WORKDAY_COMPANIES — doublon supprimé ici)
+    # TotalEnergies → Taleo (voir TALEO_SITES)
     # ── Genève / Londres ──────────────────────────────────────────────────────
     {
         "name": "Mercuria",
@@ -215,13 +210,16 @@ WORKDAY_COMPANIES = [
     {"name": "BP",        "tenant": "bpplc",     "site": "BP",                  "wd": "wd5"},
     {"name": "Equinor",   "tenant": "equinor",   "site": "EQNR",                "wd": "wd3"},
     {"name": "Orsted",    "tenant": "orsted",    "site": "OrstedCareers",       "wd": "wd3"},
-    {"name": "EDF Trading","tenant": "edftrading","site": "EDFTrading",           "wd": "wd1"},
+    {"name": "EDF Trading","tenant": "edftrading","site": "EDFTrading",           "wd": "wd3"},  # wd1 non confirmé → wd3 par défaut
+    {"name": "Centrica",  "tenant": "centrica",  "site": "Centrica",            "wd": "wd3"},
 ]
 
 SMARTRECRUITERS_COMPANIES = [
     {"name": "Vattenfall", "sr_id": "Vattenfall"},
     {"name": "RWE",        "sr_id": "RWE"},
     {"name": "Uniper",     "sr_id": "Uniper"},
+    {"name": "Vitol",      "sr_id": "Vitol"},
+    {"name": "ENGIE",      "sr_id": "ENGIE"},
 ]
 
 
@@ -462,29 +460,33 @@ def scrape_smartrecruiters(company: dict) -> list[dict]:
     return jobs
 
 
-# ── TotalEnergies Taleo ──────────────────────────────────────────────────────
+# ── Oracle Taleo (TotalEnergies, Macquarie Group) ────────────────────────────
+# Même structure ATS Oracle Taleo : SearchJobs/{query} + JobDetail/{id}
 
-TALEO_BASE = "https://jobs.totalenergies.com"
+TALEO_SITES = [
+    {"name": "TotalEnergies",  "base": "https://jobs.totalenergies.com"},
+    {"name": "Macquarie Group","base": "https://recruitment.macquarie.com"},
+]
+
 TALEO_QUERIES = [
     "power trader", "energy trader", "gas trader",
     "market risk power", "origination", "head of trading",
     "portfolio manager", "intraday", "PPA",
 ]
 
-def scrape_totalenergies() -> list[dict]:
-    """
-    TotalEnergies utilise Oracle Taleo.
-    Endpoint : /fr_FR/careers/SearchJobs/?listFilterMode=1&jobRecordsPerPage=20
-    Playwright pour exécuter le JS, puis parse les liens /careers/JobDetail/
-    """
+TALEO_LOCATIONS = [
+    "london", "paris", "geneva", "amsterdam", "brussels",
+    "singapore", "dubai", "houston", "sydney", "new york",
+]
+
+
+def scrape_taleo(company: dict) -> list[dict]:
+    """Scraper Oracle Taleo générique (TotalEnergies, Macquarie, etc.)."""
+    base = company["base"]
     jobs = []
     seen = set()
-    urls = [
-        f"{TALEO_BASE}/en_US/careers/SearchJobs/{q.replace(' ', '%20')}?listFilterMode=1&jobRecordsPerPage=20"
-        for q in TALEO_QUERIES
-    ]
-    # Fallback requests — Taleo charge partiellement sans JS
-    for url in urls:
+    for q in TALEO_QUERIES:
+        url = f"{base}/en_US/careers/SearchJobs/{q.replace(' ', '%20')}?listFilterMode=1&jobRecordsPerPage=20"
         try:
             r = requests.get(url, headers=HEADERS, timeout=15, verify=False)
             if r.status_code != 200:
@@ -492,31 +494,27 @@ def scrape_totalenergies() -> list[dict]:
             soup = BeautifulSoup(r.text, "html.parser")
             for a in soup.find_all("a", href=True):
                 href = a["href"]
-                if "/careers/JobDetail/" not in href and "/careers/JobDetail/" not in href:
+                if "/careers/JobDetail/" not in href:
                     continue
                 title = a.get_text(strip=True)
                 if not title or not is_relevant_title(title):
                     continue
                 if href.startswith("/"):
-                    href = TALEO_BASE + href
+                    href = base + href
                 dedup = href.split("?")[0].rstrip("/")
                 if dedup not in seen:
                     seen.add(dedup)
-                    # Localisation : cherche dans parent
                     location = ""
                     parent = a.find_parent(["li", "div", "tr", "section"])
                     if parent:
                         for s in parent.find_all(string=True):
                             s = s.strip()
-                            if any(loc in s.lower() for loc in [
-                                "london", "paris", "geneva", "amsterdam",
-                                "brussels", "singapore", "dubai", "houston"
-                            ]):
+                            if any(loc in s.lower() for loc in TALEO_LOCATIONS):
                                 location = s
                                 break
                     jobs.append({
                         "title": title,
-                        "company": "TotalEnergies",
+                        "company": company["name"],
                         "location": location,
                         "bucket": get_location_bucket(location),
                         "description": "",
@@ -559,7 +557,7 @@ def main():
     else:
         mode = "🚨 requests ONLY — RESULTATS INCOMPLETS (pip install playwright)"
     print("=" * 65)
-    print(f"🔍 JOB SCRAPER v10 — {mode}")
+    print(f"🔍 JOB SCRAPER v11 — {mode}")
     print(f"   Profil : Christophe D'Ippolito | Power focus")
     print(f"   Date   : {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 65)
@@ -598,11 +596,12 @@ def main():
             print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
             all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(1)
 
-        print("\n── TotalEnergies (Taleo) ─────────────────────────────────────")
-        print("🏢 TotalEnergies...", end=" ", flush=True)
-        jobs = scrape_totalenergies()
-        print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
-        all_jobs.extend(jobs); summary["TotalEnergies"] = len(jobs)
+        print("\n── Oracle Taleo (TotalEnergies, Macquarie) ──────────────────")
+        for co in TALEO_SITES:
+            print(f"🏢 {co['name']}...", end=" ", flush=True)
+            jobs = scrape_taleo(co)
+            print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
+            all_jobs.extend(jobs); summary[co["name"]] = len(jobs)
 
         # ── Sites HTML — même browser pour tous ───────────────────────────────
         print("\n── Sites HTML ───────────────────────────────────────────────")
@@ -657,7 +656,7 @@ def main():
 
     # ── Export ────────────────────────────────────────────────────────────────
     ts = datetime.now().strftime('%Y%m%d_%H%M')
-    out = f"jobs_v9_{ts}.json"
+    out = f"jobs_v11_{ts}.json"
     with open(out, "w", encoding="utf-8") as f:
         json.dump(
             sorted(all_jobs, key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"])),
