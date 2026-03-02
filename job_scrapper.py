@@ -1,5 +1,5 @@
 """
-Job Scraper v11
+Job Scraper v12
 
 INSTALLATION (une seule fois) :
     pip install playwright requests beautifulsoup4
@@ -48,12 +48,17 @@ HEADERS = {
 
 # ── Mots-clés recherche Workday/SmartRecruiters ───────────────────────────────
 
+# Aligné sur DIRECT_MATCH : les termes cherchés via API couvrent exactement
+# ce que is_relevant_title() accepte en hit direct ou via domaine × rôle.
 SEARCH_QUERIES = [
-    "power trader", "energy trader", "front office power",
-    "portfolio manager energy", "head of trading", "market risk power",
-    "risk officer power", "origination energy", "renewables trader",
-    "BESS trading", "PPA structuring", "intraday trading",
-    "algorithmic trading energy", "asset optimizer power",
+    # ── Hit direct (DIRECT_MATCH) ─────────────────────────────────────────────
+    "power trader", "energy trader", "power market", "intraday trading",
+    "front office", "portfolio manager", "head of trading", "chief risk officer",
+    "market risk", "asset optimizer", "trading analyst", "risk officer",
+    "algo trading", "algorithmic trading", "ppa manager", "ppa sales",
+    "originator",
+    # ── Domaine power × rôle (DOMAIN_POWER × ROLE_KEYWORDS) ──────────────────
+    "renewables trader", "bess trading", "power risk", "energy origination",
 ]
 
 # ── Filtre titre ──────────────────────────────────────────────────────────────
@@ -162,7 +167,7 @@ SITES = [
         "name": "BKW",
         "type": "html",
         "pages": ["https://karriere.bkw.ch/en"],
-        "job_pattern": "/en/",
+        "job_pattern": "/en/job",   # /en/job/ ou /en/jobdetail/ — plus spécifique que /en/
     },
     # ── Londres ───────────────────────────────────────────────────────────────
     # EDF Trading → Workday (voir WORKDAY_COMPANIES)
@@ -346,47 +351,6 @@ def _get_jobs_requests(url: str, site: dict) -> list[dict]:
     return []
 
 
-def scrape_all_sites(sites: list) -> dict:
-    """
-    Un seul browser Playwright pour tous les sites HTML.
-    Retourne dict {company_name: [jobs]}.
-    """
-    results = {}
-
-    if PLAYWRIGHT_AVAILABLE:
-        try:
-            with sync_playwright() as p:
-                browser = p.chromium.launch(headless=True)
-                context = browser.new_context(user_agent=HEADERS["User-Agent"])
-                pw_page = context.new_page()
-
-                for site in sites:
-                    print(f"🏢 {site['name']}...", end=" ", flush=True)
-                    jobs = scrape_site(site, pw_page=pw_page)
-                    src = set(j["source"] for j in jobs) if jobs else set()
-                    print(f"✅ {len(jobs)} [{', '.join(src)}]" if jobs else "⚠️  0")
-                    results[site["name"]] = jobs
-                    time.sleep(0.5)
-
-                browser.close()
-            return results
-        except Exception as e:
-            print(f"🚨 Browser crash global ({str(e)[:80]}) → fallback requests pour tous")
-
-    # Fallback total : requests sans browser
-    for site in sites:
-        print(f"🏢 {site['name']}...", end=" ", flush=True)
-        jobs = scrape_site(site, pw_page=None)
-        print(f"✅ {len(jobs)} [requests]" if jobs else "⚠️  0")
-        results[site["name"]] = jobs
-        time.sleep(1)
-
-    return results
-
-
-# _fallback_requests remplacé par _get_jobs_requests
-
-
 # ── Workday API ───────────────────────────────────────────────────────────────
 
 def scrape_workday(company: dict) -> list[dict]:
@@ -424,12 +388,50 @@ def scrape_workday(company: dict) -> list[dict]:
     return jobs
 
 
+def scrape_workday_broad(company: dict) -> list[dict]:
+    """
+    Requête Workday sans searchText — 1 seul appel, limit=100, filtre local.
+    Certains tenants bloquent (réponse vide ou 403). Comparer avec scrape_workday().
+    Usage : test/benchmarking, pas encore le flux principal.
+    """
+    url = (f"https://{company['tenant']}.{company['wd']}.myworkdayjobs.com"
+           f"/wday/cxs/{company['tenant']}/{company['site']}/jobs")
+    jobs = []
+    try:
+        r = requests.post(url,
+            json={"limit": 100, "offset": 0},
+            headers={**HEADERS, "Content-Type": "application/json"},
+            timeout=12, verify=False)
+        if r.status_code == 200:
+            for job in r.json().get("jobPostings", []):
+                title = job.get("title", "").strip()
+                location = job.get("locationsText", "")
+                if title and is_relevant_title(title):
+                    jobs.append({
+                        "title": title,
+                        "company": company["name"],
+                        "location": location,
+                        "bucket": get_location_bucket(location),
+                        "description": "",
+                        "url": f"https://{company['tenant']}.{company['wd']}.myworkdayjobs.com"
+                               + job.get("externalPath", ""),
+                        "date": job.get("postedOn", ""),
+                        "source": "Workday",
+                        "score": 0,
+                    })
+        else:
+            print(f"     ↳ broad HTTP {r.status_code} — tenant bloque les requêtes sans searchText")
+    except Exception as e:
+        print(f"     ↳ broad erreur : {str(e)[:60]}")
+    return jobs
+
+
 # ── SmartRecruiters API ───────────────────────────────────────────────────────
 
 def scrape_smartrecruiters(company: dict) -> list[dict]:
     jobs = []
     seen = set()
-    for q in ["power trader", "energy trader", "trading power", "risk power", "origination energy"]:
+    for q in SEARCH_QUERIES:
         try:
             r = requests.get(
                 f"https://api.smartrecruiters.com/v1/companies/{company['sr_id']}/postings",
@@ -557,7 +559,7 @@ def main():
     else:
         mode = "🚨 requests ONLY — RESULTATS INCOMPLETS (pip install playwright)"
     print("=" * 65)
-    print(f"🔍 JOB SCRAPER v11 — {mode}")
+    print(f"🔍 JOB SCRAPER v12 — {mode}")
     print(f"   Profil : Christophe D'Ippolito | Power focus")
     print(f"   Date   : {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 65)
@@ -588,6 +590,15 @@ def main():
             jobs = scrape_workday(co)
             print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
             all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(1)
+
+        # ── Test Workday broad — BP uniquement (1 req vs N queries) ──────────
+        print("\n── Workday broad test (BP) ──────────────────────────────────")
+        bp = next((co for co in WORKDAY_COMPANIES if co["name"] == "BP"), None)
+        if bp:
+            jobs_broad = scrape_workday_broad(bp)
+            bp_multi = summary.get("BP", 0)
+            status = "✅ tenant OK" if jobs_broad or bp_multi == 0 else "⚠️  0 (tenant bloque ?)"
+            print(f"   Broad (1 req) : {len(jobs_broad)} | Multi-query : {bp_multi} — {status}")
 
         print("\n── SmartRecruiters API ──────────────────────────────────────")
         for co in SMARTRECRUITERS_COMPANIES:
@@ -656,7 +667,7 @@ def main():
 
     # ── Export ────────────────────────────────────────────────────────────────
     ts = datetime.now().strftime('%Y%m%d_%H%M')
-    out = f"jobs_v11_{ts}.json"
+    out = f"jobs_v12_{ts}.json"
     with open(out, "w", encoding="utf-8") as f:
         json.dump(
             sorted(all_jobs, key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"])),
