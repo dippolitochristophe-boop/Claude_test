@@ -210,7 +210,7 @@ SITES = [
         "name": "RWE",
         "type": "html",
         "pages": ["https://www.rwe.com/en/rwe-careers-portal/job-offers/"],
-        "job_pattern": "/job-offers/details/",  # TODO: confirmer sur le site live
+        "job_pattern": "/job-offers/details/",
     },
     {
         "name": "Uniper",
@@ -232,10 +232,10 @@ WORKDAY_COMPANIES = [
     {"name": "Trafigura", "tenant": "trafigura", "site": "TrafiguraCareerSite", "wd": "wd3"},
     {"name": "Gunvor",    "tenant": "gunvor",    "site": "Gunvor_Careers",      "wd": "wd3"},
     {"name": "Shell",     "tenant": "shell",     "site": "ShellCareers",        "wd": "wd3"},
-    {"name": "BP",        "tenant": "bpplc",     "site": "BP",                  "wd": "wd5"},
+    {"name": "BP",        "tenant": "bpinternational", "site": "bpCareers",        "wd": "wd3"},
     {"name": "Equinor",   "tenant": "equinor",   "site": "EQNR",                "wd": "wd3"},
     {"name": "Orsted",    "tenant": "orsted",    "site": "OrstedCareers",       "wd": "wd3"},
-    {"name": "EDF Trading","tenant": "edftrading","site": "EDFTrading",           "wd": "wd3"},  # wd1 non confirmé → wd3 par défaut
+    {"name": "EDF Trading","tenant": "edftrading","site": "EDFTrading",           "wd": "wd1"},
     {"name": "Centrica",  "tenant": "centrica",  "site": "Centrica",            "wd": "wd3"},
 ]
 
