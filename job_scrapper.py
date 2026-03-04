@@ -1,5 +1,5 @@
 """
-Job Scraper v17
+Job Scraper v18
 
 INSTALLATION (une seule fois) :
     pip install playwright requests beautifulsoup4
@@ -129,6 +129,19 @@ BUCKET_EUR    = ["paris", "amsterdam", "brussels", "rotterdam", "oslo", "stockho
 
 BUCKET_ORDER = ["🇬🇧 London", "🇨🇭 Switzerland", "🇪🇺 Other Europe", "Unknown", "🌍 Rest of World"]
 
+# Constante partagée par parse_jobs_from_html et get_location_bucket (perf : définie une seule fois)
+LOC_CITIES = [
+    "olten", "zurich", "zürich", "geneva", "genève", "london", "lausanne",
+    "bern", "berne", "basel", "zug", "baar", "baden", "aarau", "luzern",
+    "lucerne", "winterthur", "oslo", "paris", "amsterdam", "rotterdam",
+    "brussels", "stockholm", "hamburg", "madrid", "milan", "frankfurt",
+    "düsseldorf", "houston", "singapore", "dubai", "new york", "tokyo",
+    "copenhagen", "vienna", "warsaw", "prague", "luxembourg", "edinburgh",
+    "manchester", "birmingham", "sydney", "cape town",
+    "switzerland", "norway", "germany", "netherlands", "france", "sweden",
+    "denmark", "austria", "belgium", "finland", "england", "united kingdom", "uk",
+]
+
 
 def get_location_bucket(location: str) -> str:
     loc = location.lower()
@@ -246,8 +259,8 @@ SITES = [
     {
         "name": "Danske Commodities",
         "type": "html",
-        "pages": ["https://danskecommodities.com/vacancies"],
-        "job_pattern": "/Application/",  # careers.danskecommodities.com/Application/{id}
+        "pages": ["https://careers.danskecommodities.com/Vacancies"],
+        "job_pattern": "/Application/",  # /Application/{id} sur le même domaine careers.*
     },
 ]
 
@@ -307,17 +320,6 @@ def parse_jobs_from_html(html: str, site: dict) -> list[dict]:
         location = ""
         parent = a.find_parent(["li", "article", "div", "section"])
         if parent:
-            LOC_CITIES = ["olten", "zurich", "zürich", "geneva", "genève",
-                          "london", "lausanne", "bern", "berne", "basel", "zug", "baar",
-                          "baden", "aarau", "luzern", "lucerne", "winterthur",
-                          "oslo", "paris", "amsterdam", "rotterdam", "brussels", "stockholm",
-                          "hamburg", "madrid", "milan", "frankfurt", "düsseldorf",
-                          "houston", "singapore", "dubai", "new york", "tokyo",
-                          "copenhagen", "vienna", "warsaw", "prague", "luxembourg",
-                          "edinburgh", "manchester", "birmingham", "sydney", "cape town",
-                          "switzerland", "norway", "germany", "netherlands", "france",
-                          "sweden", "denmark", "austria", "belgium", "finland",
-                          "england", "united kingdom", "uk"]
             candidates = []
             for s in parent.find_all(string=True):
                 s = s.strip()
@@ -344,7 +346,7 @@ def parse_jobs_from_html(html: str, site: dict) -> list[dict]:
                 "description": "",
                 "url": href,
                 "date": "",
-                "source": "Playwright" if PLAYWRIGHT_AVAILABLE else "requests",
+                "source": "html",  # surchargé par l'appelant ("Playwright" ou "requests")
                 "score": 0,
             })
     return jobs
@@ -419,11 +421,11 @@ def scrape_workday(company: dict) -> list[dict]:
     jobs = []
     seen = set()
     any_200 = False  # au moins une requête réussie → endpoint valide
+    base_url = f"https://{company['tenant']}.{company['wd']}.myworkdayjobs.com"
+    api_url = f"{base_url}/wday/cxs/{company['tenant']}/{company['site']}/jobs"
     for query in SEARCH_QUERIES:
-        url = (f"https://{company['tenant']}.{company['wd']}.myworkdayjobs.com"
-               f"/wday/cxs/{company['tenant']}/{company['site']}/jobs")
         try:
-            r = requests.post(url,
+            r = requests.post(api_url,
                 json={"limit": 20, "offset": 0, "searchText": query},
                 headers={**HEADERS, "Content-Type": "application/json"},
                 timeout=12, verify=False)
@@ -432,30 +434,29 @@ def scrape_workday(company: dict) -> list[dict]:
                 for job in r.json().get("jobPostings", []):
                     title = job.get("title", "").strip()
                     location = job.get("locationsText", "")
-                    if title and title not in seen and is_relevant_title(title):
-                        seen.add(title)
+                    ext_path = job.get("externalPath", "")
+                    dedup_key = ext_path or title  # URL en priorité, titre en fallback
+                    if title and dedup_key not in seen and is_relevant_title(title):
+                        seen.add(dedup_key)
                         jobs.append({
                             "title": title,
                             "company": company["name"],
                             "location": location,
                             "bucket": get_location_bucket(location),
                             "description": "",
-                            "url": f"https://{company['tenant']}.{company['wd']}.myworkdayjobs.com"
-                                   + job.get("externalPath", ""),
+                            "url": base_url + ext_path,
                             "date": job.get("postedOn", ""),
                             "source": "Workday",
                             "score": 0,
                         })
             elif r.status_code in (404, 403):
-                # Endpoint mauvais (tenant/site incorrect) — inutile de continuer
+                # Endpoint invalide (tenant/site incorrect) — inutile de continuer
                 print(f"   ↳ HTTP {r.status_code} — tenant/site '{company['site']}' invalide")
                 break
         except Exception as e:
-            print(f"   ↳ erreur réseau : {str(e)[:60]}")
-            break
+            print(f"   ↳ erreur réseau [{query[:20]}] : {str(e)[:50]}")
+            continue  # erreur transitoire — on tente les queries suivantes
         time.sleep(0.3)
-    if not any_200 and not jobs:
-        pass  # sera affiché par l'appelant avec ⚠️  0
     return jobs
 
 
@@ -536,8 +537,8 @@ def scrape_smartrecruiters(company: dict) -> list[dict]:
                 endpoint_ok = False
                 break
         except Exception as e:
-            print(f"   ↳ erreur réseau : {str(e)[:60]}")
-            break
+            print(f"   ↳ erreur réseau [{q[:20]}] : {str(e)[:50]}")
+            continue  # erreur transitoire — on tente les queries suivantes
         time.sleep(0.3)
     return jobs
 
@@ -655,7 +656,7 @@ def main():
     else:
         mode = "🚨 requests ONLY — RESULTATS INCOMPLETS (pip install playwright)"
     print("=" * 65)
-    print(f"🔍 JOB SCRAPER v17 — {mode}")
+    print(f"🔍 JOB SCRAPER v18 — {mode}")
     print(f"   Profil : Christophe D'Ippolito | Power focus")
     print(f"   Date   : {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 65)
@@ -665,6 +666,7 @@ def main():
 
     # ── 1 browser ouvert pour tout le run ────────────────────────────────────
     playwright_ctx = None
+    browser = None
     pw_page = None
     if PLAYWRIGHT_AVAILABLE:
         try:
@@ -675,7 +677,19 @@ def main():
             print("🌐 Browser Chromium ouvert\n")
         except Exception as e:
             print(f"🚨 Browser fail ({str(e)[:80]}) → requests fallback pour tous\n")
+            # Nettoyage explicite pour éviter les processus orphelins
+            try:
+                if browser:
+                    browser.close()
+            except Exception:
+                pass
+            try:
+                if playwright_ctx:
+                    playwright_ctx.stop()
+            except Exception:
+                pass
             playwright_ctx = None
+            browser = None
             pw_page = None
 
     try:
@@ -711,10 +725,11 @@ def main():
             all_jobs.extend(jobs); summary[site["name"]] = len(jobs); time.sleep(0.5)
 
     finally:
-        # Fermeture browser dans tous les cas
+        # Fermeture browser dans tous les cas (évite les processus orphelins)
         if playwright_ctx:
             try:
-                browser.close()
+                if browser:
+                    browser.close()
                 playwright_ctx.stop()
                 print("\n🌐 Browser fermé")
             except Exception:
@@ -754,7 +769,7 @@ def main():
 
     # ── Export ────────────────────────────────────────────────────────────────
     ts = datetime.now().strftime('%Y%m%d_%H%M')
-    out = f"jobs_v17_{ts}.json"
+    out = f"jobs_v18_{ts}.json"
     with open(out, "w", encoding="utf-8") as f:
         json.dump(
             sorted(all_jobs, key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"])),
