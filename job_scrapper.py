@@ -13,6 +13,8 @@ ARCHITECTURE :
 - APIs JSON (Workday, SmartRecruiters) sans browser
 """
 
+import argparse
+import os
 import requests
 import json
 import time
@@ -22,6 +24,8 @@ from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+SEEN_FILE = ".jobs_seen.json"
 
 try:
     from playwright.sync_api import sync_playwright
@@ -648,15 +652,154 @@ def score_job(job: dict) -> int:
     return score
 
 
+# ── CLI args ──────────────────────────────────────────────────────────────────
+
+def parse_args():
+    p = argparse.ArgumentParser(description="Job Scraper v19 — Power/Energy trading positions")
+    p.add_argument("--new-only", action="store_true",
+                   help="Affiche uniquement les offres nouvelles depuis le dernier run")
+    p.add_argument("--html", action="store_true",
+                   help="Génère un rapport HTML interactif (rapport_YYYYMMDD_HHMM.html)")
+    p.add_argument("--company", nargs="+", metavar="NOM",
+                   help="Scrape uniquement ces sociétés (ex: --company Shell BP Axpo)")
+    p.add_argument("--bucket", nargs="+", metavar="ZONE",
+                   help="Filtre les résultats par zone géo (ex: --bucket London Switzerland)")
+    return p.parse_args()
+
+
+def filter_companies(lst: list, names) -> list:
+    """Retourne lst filtré sur les noms demandés (insensible à la casse). None → tout."""
+    if not names:
+        return lst
+    names_lower = [n.lower() for n in names]
+    return [co for co in lst if co["name"].lower() in names_lower]
+
+
+# ── Delta mode ────────────────────────────────────────────────────────────────
+
+def load_seen() -> tuple[set, str]:
+    """Charge les URLs déjà vues et la date du dernier run."""
+    if os.path.exists(SEEN_FILE):
+        with open(SEEN_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return set(data.get("urls", [])), data.get("last_run", "")
+    return set(), ""
+
+
+def save_seen(jobs: list):
+    """Sauvegarde toutes les URLs du run courant comme 'déjà vues'."""
+    with open(SEEN_FILE, "w", encoding="utf-8") as f:
+        json.dump({
+            "last_run": datetime.now().strftime("%Y-%m-%d %H:%M"),
+            "urls": [j["url"] for j in jobs],
+        }, f, ensure_ascii=False, indent=2)
+
+
+# ── HTML report ───────────────────────────────────────────────────────────────
+
+def generate_html_report(jobs: list, new_urls: set = None) -> str:
+    """Génère un rapport HTML autonome avec liens cliquables. Retourne le nom du fichier."""
+    date_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    ts = datetime.now().strftime("%Y%m%d_%H%M")
+    filename = f"rapport_{ts}.html"
+
+    new_count_str = f" · <b>{len(new_urls)} nouvelles</b>" if new_urls is not None else ""
+
+    buckets_html = ""
+    for bucket in BUCKET_ORDER:
+        bucket_jobs = sorted(
+            [j for j in jobs if j["bucket"] == bucket],
+            key=lambda x: x["score"], reverse=True,
+        )
+        if not bucket_jobs:
+            continue
+        jobs_html = ""
+        for job in bucket_jobs:
+            is_new = new_urls is not None and job["url"] in new_urls
+            new_badge = '<span class="new-badge">NEW</span>' if is_new else ""
+            filled = min(job["score"] // 2, 5)
+            stars = "★" * filled + "☆" * (5 - filled)
+            date_html = f'📅 {job["date"]} &nbsp;·&nbsp; ' if job.get("date") else ""
+            title_safe = job["title"].replace("&", "&amp;").replace("<", "&lt;")
+            company_safe = job["company"].replace("&", "&amp;")
+            location_safe = (job["location"] or "?").replace("&", "&amp;")
+            jobs_html += f"""
+        <div class="job">
+          <div class="job-title">
+            <a href="{job['url']}" target="_blank" rel="noopener">{title_safe}</a>{new_badge}
+          </div>
+          <div class="job-meta">
+            🏢 {company_safe} &nbsp;·&nbsp; 📍 {location_safe} &nbsp;·&nbsp;
+            {date_html}<span class="score">{stars}</span> {job['score']}pts &nbsp;·&nbsp;
+            <span class="ats">{job['source']}</span>
+          </div>
+        </div>"""
+        buckets_html += f"""
+    <div class="bucket">
+      <h2>{bucket} — {len(bucket_jobs)} offre(s)</h2>
+      {jobs_html}
+    </div>"""
+
+    html = f"""<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Job Scraper — {date_str}</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ font-family: system-ui, -apple-system, sans-serif; background: #f0f2f5; padding: 24px; color: #1a1a2e; }}
+    .header {{ background: #1a1a2e; color: white; padding: 20px 24px; border-radius: 10px; margin-bottom: 20px; }}
+    .header h1 {{ font-size: 1.3em; font-weight: 700; }}
+    .header p {{ color: #a0aec0; font-size: 0.9em; margin-top: 6px; }}
+    .bucket {{ background: white; border-radius: 10px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); overflow: hidden; }}
+    .bucket h2 {{ padding: 14px 20px; font-size: 1em; background: #fafafa; border-bottom: 1px solid #eee; color: #374151; }}
+    .job {{ padding: 12px 20px; border-bottom: 1px solid #f3f4f6; }}
+    .job:last-child {{ border-bottom: none; }}
+    .job-title a {{ font-weight: 600; color: #2563eb; text-decoration: none; font-size: 0.95em; }}
+    .job-title a:hover {{ text-decoration: underline; }}
+    .job-meta {{ color: #6b7280; font-size: 0.82em; margin-top: 4px; }}
+    .score {{ color: #f59e0b; letter-spacing: 1px; }}
+    .new-badge {{ background: #dcfce7; color: #15803d; font-size: 0.68em; font-weight: 700;
+                  padding: 2px 7px; border-radius: 10px; margin-left: 8px; vertical-align: middle; }}
+    .ats {{ background: #eff6ff; color: #3b82f6; font-size: 0.75em; padding: 1px 6px; border-radius: 4px; }}
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>🔍 Job Scraper v19 — Christophe D'Ippolito</h1>
+    <p>{len(jobs)} offres{new_count_str} · {date_str}</p>
+  </div>
+  {buckets_html}
+</body>
+</html>"""
+
+    with open(filename, "w", encoding="utf-8") as f:
+        f.write(html)
+    return filename
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    args = parse_args()
+
+    # ── Filtre sociétés ───────────────────────────────────────────────────────
+    sites       = filter_companies(SITES,                     args.company)
+    workday_cos = filter_companies(WORKDAY_COMPANIES,         args.company)
+    sr_cos      = filter_companies(SMARTRECRUITERS_COMPANIES, args.company)
+    taleo_cos   = filter_companies(TALEO_SITES,               args.company)
+
+    if args.company:
+        found = len(sites) + len(workday_cos) + len(sr_cos) + len(taleo_cos)
+        print(f"🔎 Filtre --company : {', '.join(args.company)} → {found} société(s) retenue(s)")
+
     if PLAYWRIGHT_AVAILABLE:
         mode = "✅ Playwright + fallback requests — FULL COVERAGE"
     else:
         mode = "🚨 requests ONLY — RESULTATS INCOMPLETS (pip install playwright)"
     print("=" * 65)
-    print(f"🔍 JOB SCRAPER v18 — {mode}")
+    print(f"🔍 JOB SCRAPER v19 — {mode}")
     print(f"   Profil : Christophe D'Ippolito | Power focus")
     print(f"   Date   : {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 65)
@@ -695,21 +838,21 @@ def main():
     try:
         # ── APIs JSON (pas de browser nécessaire) ─────────────────────────────
         print("── Workday API ──────────────────────────────────────────────")
-        for co in WORKDAY_COMPANIES:
+        for co in workday_cos:
             print(f"🏢 {co['name']}...", end=" ", flush=True)
             jobs = scrape_workday(co)
             print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
             all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(1)
 
         print("\n── SmartRecruiters API ──────────────────────────────────────")
-        for co in SMARTRECRUITERS_COMPANIES:
+        for co in sr_cos:
             print(f"🏢 {co['name']}...", end=" ", flush=True)
             jobs = scrape_smartrecruiters(co)
             print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
             all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(1)
 
         print("\n── Oracle Taleo (TotalEnergies, Macquarie) ──────────────────")
-        for co in TALEO_SITES:
+        for co in taleo_cos:
             print(f"🏢 {co['name']}...", end=" ", flush=True)
             jobs = scrape_taleo(co)
             print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
@@ -717,7 +860,7 @@ def main():
 
         # ── Sites HTML — même browser pour tous ───────────────────────────────
         print("\n── Sites HTML ───────────────────────────────────────────────")
-        for site in SITES:
+        for site in sites:
             print(f"🏢 {site['name']}...", end=" ", flush=True)
             jobs = scrape_site(site, pw_page=pw_page)
             src = set(j["source"] for j in jobs) if jobs else set()
@@ -739,6 +882,24 @@ def main():
     for job in all_jobs:
         job["score"] = score_job(job)
 
+    # ── Delta mode ────────────────────────────────────────────────────────────
+    new_urls = set()
+    last_run_date = ""
+    if args.new_only:
+        seen_urls, last_run_date = load_seen()
+        new_urls = {j["url"] for j in all_jobs} - seen_urls
+        save_seen(all_jobs)
+
+    # ── Filtre bucket ─────────────────────────────────────────────────────────
+    display_jobs = all_jobs
+    if args.bucket:
+        bl = [b.lower() for b in args.bucket]
+        display_jobs = [j for j in display_jobs if any(b in j["bucket"].lower() for b in bl)]
+
+    # ── Filtre new-only sur display ───────────────────────────────────────────
+    if args.new_only:
+        display_jobs = [j for j in display_jobs if j["url"] in new_urls]
+
     # ── Non-régression ────────────────────────────────────────────────────────
     all_titles = [j["title"] for j in all_jobs]
     print("\n── ✅ Non-régression ────────────────────────────────────────")
@@ -748,11 +909,15 @@ def main():
 
     # ── Affichage par bucket ──────────────────────────────────────────────────
     print("\n" + "=" * 65)
-    print(f"📊 {len(all_jobs)} offres pertinentes (toutes localisations)")
+    if args.new_only:
+        since = f" depuis {last_run_date}" if last_run_date else ""
+        print(f"🆕 {len(display_jobs)} nouvelles offres{since} (sur {len(all_jobs)} total)")
+    else:
+        print(f"📊 {len(display_jobs)} offres pertinentes (toutes localisations)")
     print("=" * 65)
 
     for bucket in BUCKET_ORDER:
-        bucket_jobs = sorted([j for j in all_jobs if j["bucket"] == bucket],
+        bucket_jobs = sorted([j for j in display_jobs if j["bucket"] == bucket],
                              key=lambda x: x["score"], reverse=True)
         if not bucket_jobs:
             continue
@@ -760,21 +925,28 @@ def main():
         print(f"  {bucket} — {len(bucket_jobs)} offre(s)")
         print(f"{'=' * 65}")
         for i, job in enumerate(bucket_jobs, 1):
-            print(f"  #{i:02d} [{job['score']}⭐] {job['title']}")
+            is_new = job["url"] in new_urls
+            new_tag = " 🆕" if is_new else ""
+            print(f"  #{i:02d} [{job['score']}⭐]{new_tag} {job['title']}")
             print(f"       🏢 {job['company']} | 📍 {job['location']} | {job['source']}")
-            print(f"       🔗 {job['url'][:85]}")
+            print(f"       🔗 {job['url']}")
             if job.get("date"):
                 print(f"       📅 {job['date']}")
             print()
 
-    # ── Export ────────────────────────────────────────────────────────────────
+    # ── Export JSON ───────────────────────────────────────────────────────────
     ts = datetime.now().strftime('%Y%m%d_%H%M')
-    out = f"jobs_v18_{ts}.json"
+    out = f"jobs_v19_{ts}.json"
     with open(out, "w", encoding="utf-8") as f:
         json.dump(
-            sorted(all_jobs, key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"])),
+            sorted(display_jobs, key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"])),
             f, ensure_ascii=False, indent=2)
-    print(f"\n✅ Export : {out}")
+    print(f"\n✅ Export JSON : {out}")
+
+    # ── Rapport HTML ──────────────────────────────────────────────────────────
+    if args.html:
+        html_file = generate_html_report(display_jobs, new_urls if args.new_only else None)
+        print(f"🌐 Rapport HTML : {html_file}")
 
     print("\n📋 RÉCAP PAR SOCIÉTÉ")
     for co, cnt in sorted(summary.items(), key=lambda x: -x[1]):
