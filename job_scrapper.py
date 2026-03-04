@@ -658,8 +658,8 @@ def parse_args():
     p = argparse.ArgumentParser(description="Job Scraper v19 — Power/Energy trading positions")
     p.add_argument("--new-only", action="store_true",
                    help="Affiche uniquement les offres nouvelles depuis le dernier run")
-    p.add_argument("--html", action="store_true",
-                   help="Génère un rapport HTML interactif (rapport_YYYYMMDD_HHMM.html)")
+    p.add_argument("--no-html", action="store_true",
+                   help="Désactive la génération du rapport HTML")
     p.add_argument("--company", nargs="+", metavar="NOM",
                    help="Scrape uniquement ces sociétés (ex: --company Shell BP Axpo)")
     p.add_argument("--bucket", nargs="+", metavar="ZONE",
@@ -944,7 +944,7 @@ def main():
     print(f"\n✅ Export JSON : {out}")
 
     # ── Rapport HTML ──────────────────────────────────────────────────────────
-    if args.html:
+    if not args.no_html:
         html_file = generate_html_report(display_jobs, new_urls if args.new_only else None)
         print(f"🌐 Rapport HTML : {html_file}")
 
