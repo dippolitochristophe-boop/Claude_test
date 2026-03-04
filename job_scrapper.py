@@ -205,6 +205,25 @@ SITES = [
         "pages": ["https://met-group.jobs/en/jobs"],
         "job_pattern": "/en/jobs/",
     },
+    # ── Anciens SmartRecruiters — portails HTML propres ───────────────────────
+    {
+        "name": "RWE",
+        "type": "html",
+        "pages": ["https://www.rwe.com/en/rwe-careers-portal/job-offers/"],
+        "job_pattern": "/job-offers/details/",  # TODO: confirmer sur le site live
+    },
+    {
+        "name": "Uniper",
+        "type": "html",
+        "pages": ["https://careers.uniper.energy/en"],
+        "job_pattern": "/job/",  # iCIMS — pattern typique /job/Job-Title/JOBID/
+    },
+    {
+        "name": "ENGIE",
+        "type": "html",
+        "pages": ["https://jobs.engie.com/"],
+        "job_pattern": "/job/",  # confirmé : jobs.engie.com/job/{title}/{id}-en_US/
+    },
 ]
 
 # ── APIs JSON (Workday + SmartRecruiters) ─────────────────────────────────────
@@ -221,11 +240,11 @@ WORKDAY_COMPANIES = [
 ]
 
 SMARTRECRUITERS_COMPANIES = [
-    {"name": "Vattenfall", "sr_id": "Vattenfall"},
-    {"name": "RWE",        "sr_id": "RWE"},
-    {"name": "Uniper",     "sr_id": "Uniper"},
-    {"name": "Vitol",      "sr_id": "Vitol"},
-    {"name": "ENGIE",      "sr_id": "ENGIE"},
+    {"name": "Vattenfall", "sr_id": "Vattenfall"},  # confirmé : careers.smartrecruiters.com/vattenfall
+    {"name": "Vitol",      "sr_id": "Vitol"},       # confirmé : jobs.smartrecruiters.com/Vitol/...
+    # RWE   → déplacé dans SITES (portail HTML propre, pas SmartRecruiters)
+    # Uniper → déplacé dans SITES (portail iCIMS careers.uniper.energy)
+    # ENGIE  → déplacé dans SITES (portail jobs.engie.com)
 ]
 
 
