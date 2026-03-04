@@ -120,7 +120,8 @@ def is_relevant_title(text: str) -> bool:
 
 BUCKET_LONDON = ["london", "united kingdom", "uk ", " uk", "england"]
 BUCKET_SWISS  = ["geneva", "genève", "geneve", "lausanne", "zurich", "zürich",
-                 "switzerland", "swiss", "olten", "bern", "berne", "basel", "zug", "baar"]
+                 "switzerland", "swiss", "olten", "bern", "berne", "basel", "zug", "baar",
+                 "baden", "aarau", "luzern", "lucerne", "winterthur", "lugano", "nyon"]
 BUCKET_EUR    = ["paris", "amsterdam", "brussels", "rotterdam", "oslo", "stockholm",
                  "hamburg", "düsseldorf", "madrid", "milan", "frankfurt", "netherlands",
                  "france", "germany", "norway", "sweden", "spain", "italy", "belgium",
@@ -258,18 +259,28 @@ def parse_jobs_from_html(html: str, site: dict) -> list[dict]:
         if not is_relevant_title(text):
             continue
 
-        # Localisation : cherche dans le parent, "Unknown" si non trouvé
+        # Localisation : cherche dans le parent, préfère la chaîne la plus courte
         location = ""
         parent = a.find_parent(["li", "article", "div", "section"])
         if parent:
+            LOC_CITIES = ["olten", "zurich", "zürich", "geneva", "genève",
+                          "london", "lausanne", "bern", "berne", "basel", "zug", "baar",
+                          "baden", "aarau", "luzern", "lucerne", "winterthur",
+                          "oslo", "paris", "amsterdam", "rotterdam", "brussels", "stockholm",
+                          "hamburg", "madrid", "milan", "frankfurt", "düsseldorf",
+                          "houston", "singapore", "dubai", "new york", "tokyo",
+                          "copenhagen", "vienna", "warsaw", "prague", "luxembourg",
+                          "edinburgh", "manchester", "birmingham", "sydney", "cape town",
+                          "switzerland", "norway", "germany", "netherlands", "france",
+                          "sweden", "denmark", "austria", "belgium", "finland",
+                          "england", "united kingdom", "uk"]
+            candidates = []
             for s in parent.find_all(string=True):
                 s = s.strip()
-                if any(loc in s.lower() for loc in ["olten", "zurich", "zürich", "geneva",
-                       "london", "lausanne", "bern", "basel", "oslo", "paris", "amsterdam",
-                       "rotterdam", "brussels", "stockholm", "hamburg", "madrid", "milan",
-                       "houston", "singapore", "dubai", "new york", "tokyo"]):
-                    location = s
-                    break
+                if 2 < len(s) <= 80 and any(loc in s.lower() for loc in LOC_CITIES):
+                    candidates.append(s)
+            if candidates:
+                location = min(candidates, key=len)  # la plus courte = la plus précise
 
         if href.startswith("/"):
             href = base + href
@@ -312,9 +323,16 @@ def scrape_site(site: dict, pw_page=None) -> list[dict]:
         # ── Playwright (page passée depuis le browser global) ──────────────
         if pw_page is not None:
             try:
-                pw_page.goto(url, wait_until="networkidle", timeout=25000)
-                pw_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                pw_page.wait_for_timeout(1500)
+                try:
+                    pw_page.goto(url, wait_until="networkidle", timeout=30000)
+                except Exception:
+                    # networkidle peut ne jamais se déclencher sur les SPAs
+                    pw_page.goto(url, wait_until="load", timeout=30000)
+                # Scroll progressif pour déclencher le lazy-loading
+                for _ in range(3):
+                    pw_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    pw_page.wait_for_timeout(700)
+                pw_page.wait_for_timeout(1000)
                 jobs = parse_jobs_from_html(pw_page.content(), site)
                 for j in jobs:
                     j["source"] = "Playwright"
@@ -356,6 +374,7 @@ def _get_jobs_requests(url: str, site: dict) -> list[dict]:
 def scrape_workday(company: dict) -> list[dict]:
     jobs = []
     seen = set()
+    any_200 = False  # au moins une requête réussie → endpoint valide
     for query in SEARCH_QUERIES:
         url = (f"https://{company['tenant']}.{company['wd']}.myworkdayjobs.com"
                f"/wday/cxs/{company['tenant']}/{company['site']}/jobs")
@@ -365,6 +384,7 @@ def scrape_workday(company: dict) -> list[dict]:
                 headers={**HEADERS, "Content-Type": "application/json"},
                 timeout=12, verify=False)
             if r.status_code == 200:
+                any_200 = True
                 for job in r.json().get("jobPostings", []):
                     title = job.get("title", "").strip()
                     location = job.get("locationsText", "")
@@ -382,9 +402,16 @@ def scrape_workday(company: dict) -> list[dict]:
                             "source": "Workday",
                             "score": 0,
                         })
-        except Exception:
-            pass
+            elif r.status_code in (404, 403):
+                # Endpoint mauvais (tenant/site incorrect) — inutile de continuer
+                print(f"   ↳ HTTP {r.status_code} — tenant/site '{company['site']}' invalide")
+                break
+        except Exception as e:
+            print(f"   ↳ erreur réseau : {str(e)[:60]}")
+            break
         time.sleep(0.3)
+    if not any_200 and not jobs:
+        pass  # sera affiché par l'appelant avec ⚠️  0
     return jobs
 
 
@@ -431,6 +458,7 @@ def scrape_workday_broad(company: dict) -> list[dict]:
 def scrape_smartrecruiters(company: dict) -> list[dict]:
     jobs = []
     seen = set()
+    endpoint_ok = None  # None=inconnu, True=OK, False=invalide
     for q in SEARCH_QUERIES:
         try:
             r = requests.get(
@@ -438,10 +466,13 @@ def scrape_smartrecruiters(company: dict) -> list[dict]:
                 params={"q": q, "limit": 20},
                 headers=HEADERS, timeout=12, verify=False)
             if r.status_code == 200:
+                endpoint_ok = True
                 for job in r.json().get("content", []):
                     title = job.get("name", "").strip()
                     loc = job.get("location", {})
-                    location = f"{loc.get('city', '')} {loc.get('country', '')}".strip()
+                    city = loc.get("city", "")
+                    country = loc.get("country", "")
+                    location = f"{city} {country}".strip() if (city or country) else ""
                     job_id = job.get("id", "")
                     if title and title not in seen and is_relevant_title(title):
                         seen.add(title)
@@ -456,8 +487,13 @@ def scrape_smartrecruiters(company: dict) -> list[dict]:
                             "source": "SmartRecruiters",
                             "score": 0,
                         })
-        except Exception:
-            pass
+            elif r.status_code == 404 and endpoint_ok is None:
+                print(f"   ↳ HTTP 404 — company id '{company['sr_id']}' invalide sur SmartRecruiters")
+                endpoint_ok = False
+                break
+        except Exception as e:
+            print(f"   ↳ erreur réseau : {str(e)[:60]}")
+            break
         time.sleep(0.3)
     return jobs
 
@@ -476,10 +512,33 @@ TALEO_QUERIES = [
     "portfolio manager", "intraday", "PPA",
 ]
 
-TALEO_LOCATIONS = [
-    "london", "paris", "geneva", "amsterdam", "brussels",
-    "singapore", "dubai", "houston", "sydney", "new york",
-]
+def _taleo_extract_location(a_tag) -> str:
+    """Extrait la localisation d'un item Taleo — multiple stratégies."""
+    parent = a_tag.find_parent(["li", "tr", "div", "section"])
+    if not parent:
+        return ""
+
+    # Stratégie 1 : classe Taleo standard (listSrchResultLocation, jobLocation, etc.)
+    for cls_kw in ["location", "Location", "loc"]:
+        el = parent.find(class_=lambda c: c and cls_kw in c)
+        if el:
+            txt = el.get_text(strip=True)
+            if txt and len(txt) < 100:
+                return txt
+
+    # Stratégie 2 : <td> / <span> sibling contenant une virgule (format "City, Country")
+    for tag in parent.find_all(["td", "span", "p", "div"], recursive=False):
+        txt = tag.get_text(strip=True)
+        if "," in txt and 3 < len(txt) < 80 and tag != a_tag.parent:
+            return txt
+
+    # Stratégie 3 : texte court avec virgule dans tous les descendants
+    for s in parent.find_all(string=True):
+        s = s.strip()
+        if "," in s and 3 < len(s) < 60 and s != a_tag.get_text(strip=True):
+            return s
+
+    return ""
 
 
 def scrape_taleo(company: dict) -> list[dict]:
@@ -506,14 +565,7 @@ def scrape_taleo(company: dict) -> list[dict]:
                 dedup = href.split("?")[0].rstrip("/")
                 if dedup not in seen:
                     seen.add(dedup)
-                    location = ""
-                    parent = a.find_parent(["li", "div", "tr", "section"])
-                    if parent:
-                        for s in parent.find_all(string=True):
-                            s = s.strip()
-                            if any(loc in s.lower() for loc in TALEO_LOCATIONS):
-                                location = s
-                                break
+                    location = _taleo_extract_location(a)
                     jobs.append({
                         "title": title,
                         "company": company["name"],
@@ -597,7 +649,10 @@ def main():
         if bp:
             jobs_broad = scrape_workday_broad(bp)
             bp_multi = summary.get("BP", 0)
-            status = "✅ tenant OK" if jobs_broad or bp_multi == 0 else "⚠️  0 (tenant bloque ?)"
+            if jobs_broad or bp_multi > 0:
+                status = "✅ résultats trouvés"
+            else:
+                status = "⚠️  0 partout — URL/site à vérifier"
             print(f"   Broad (1 req) : {len(jobs_broad)} | Multi-query : {bp_multi} — {status}")
 
         print("\n── SmartRecruiters API ──────────────────────────────────────")
