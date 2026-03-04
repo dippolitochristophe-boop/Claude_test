@@ -386,6 +386,8 @@ def scrape_site(site: dict, pw_page=None) -> list[dict]:
                 jobs = parse_jobs_from_html(pw_page.content(), site)
                 for j in jobs:
                     j["source"] = "Playwright"
+                if not jobs:
+                    print(f"     ↳ Playwright OK — 0 lien '{site['job_pattern']}' trouvé → rendu SPA? job_pattern à revoir?")
             except Exception as e:
                 print(f"     ⚠️  Playwright fail → requests ({str(e)[:70]})")
                 jobs = _get_jobs_requests(url, site)
@@ -413,9 +415,17 @@ def _get_jobs_requests(url: str, site: dict) -> list[dict]:
             jobs = parse_jobs_from_html(r.text, site)
             for j in jobs:
                 j["source"] = "requests"
+            if not jobs:
+                print(f"     ↳ requests OK (HTTP 200) — 0 lien '{site['job_pattern']}' trouvé → vérifier job_pattern ou rendu JS")
             return jobs
-    except Exception:
-        pass
+        else:
+            print(f"     ↳ requests HTTP {r.status_code} — config ATS à vérifier")
+    except requests.exceptions.ConnectionError:
+        print(f"     ↳ requests DNS/connexion fail — URL invalide ou proxy bloquant")
+    except requests.exceptions.Timeout:
+        print(f"     ↳ requests timeout (>15s) — site lent ou accès bloqué")
+    except Exception as e:
+        print(f"     ↳ requests erreur ({str(e)[:70]})")
     return []
 
 
@@ -951,7 +961,13 @@ def main():
     print("\n📋 RÉCAP PAR SOCIÉTÉ")
     for co, cnt in sorted(summary.items(), key=lambda x: -x[1]):
         if cnt > 0:
-            print(f"   {co:35s} {cnt:3d} offre(s)")
+            print(f"   ✅ {co:33s} {cnt:3d} offre(s)")
+
+    zeros = [co for co, cnt in summary.items() if cnt == 0]
+    if zeros:
+        print(f"\n🔧 {len(zeros)} société(s) à investiguer (0 offre) :")
+        for co in sorted(zeros):
+            print(f"   ⚠️  {co}")
 
 
 if __name__ == "__main__":
