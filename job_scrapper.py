@@ -234,7 +234,7 @@ WORKDAY_COMPANIES = [
     {"name": "Shell",     "tenant": "shell",     "site": "ShellCareers",        "wd": "wd3"},
     {"name": "BP",        "tenant": "bpinternational", "site": "bpCareers",        "wd": "wd3"},
     {"name": "Equinor",   "tenant": "equinor",   "site": "EQNR",                "wd": "wd3"},
-    {"name": "Orsted",    "tenant": "orsted",    "site": "OrstedCareers",       "wd": "wd3"},
+    {"name": "Orsted",    "tenant": "orsted",    "site": "OrstedCareers",       "wd": "wd3"},  # non confirmé — portail Workday non indexé
     {"name": "EDF Trading","tenant": "edftrading","site": "EDFTrading",           "wd": "wd1"},
     {"name": "Centrica",  "tenant": "centrica",  "site": "Centrica",            "wd": "wd3"},
 ]
