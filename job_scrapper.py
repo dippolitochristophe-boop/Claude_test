@@ -1,5 +1,5 @@
 """
-Job Scraper v12
+Job Scraper v16
 
 INSTALLATION (une seule fois) :
     pip install playwright requests beautifulsoup4
@@ -229,14 +229,14 @@ SITES = [
 # ── APIs JSON (Workday + SmartRecruiters) ─────────────────────────────────────
 
 WORKDAY_COMPANIES = [
-    {"name": "Trafigura", "tenant": "trafigura", "site": "TrafiguraCareerSite", "wd": "wd3"},
-    {"name": "Gunvor",    "tenant": "gunvor",    "site": "Gunvor_Careers",      "wd": "wd3"},
-    {"name": "Shell",     "tenant": "shell",     "site": "ShellCareers",        "wd": "wd3"},
-    {"name": "BP",        "tenant": "bpinternational", "site": "bpCareers",        "wd": "wd3"},
-    {"name": "Equinor",   "tenant": "equinor",   "site": "EQNR",                "wd": "wd3"},
-    {"name": "Orsted",    "tenant": "orsted",    "site": "OrstedCareers",       "wd": "wd3"},  # non confirmé — portail Workday non indexé
-    {"name": "EDF Trading","tenant": "edftrading","site": "EDFTrading",           "wd": "wd1"},
-    {"name": "Centrica",  "tenant": "centrica",  "site": "Centrica",            "wd": "wd3"},
+    {"name": "Trafigura", "tenant": "trafigura",    "site": "TrafiguraCareerSite", "wd": "wd3"},  # ✅ confirmé
+    {"name": "Gunvor",    "tenant": "gunvor",        "site": "Gunvor_Careers",      "wd": "wd3"},  # ✅ confirmé
+    {"name": "Shell",     "tenant": "shell",         "site": "ShellCareers",        "wd": "wd3"},  # ✅ confirmé
+    {"name": "BP",        "tenant": "bpinternational","site": "bpCareers",           "wd": "wd3"},  # ✅ confirmé (corrigé v15)
+    {"name": "Equinor",   "tenant": "equinor",       "site": "EQNR",                "wd": "wd3"},  # ✅ confirmé
+    {"name": "Orsted",    "tenant": "orsted",        "site": "OrstedCareers",       "wd": "wd3"},  # ❓ non confirmé — portail Workday non indexé
+    {"name": "EDF Trading","tenant": "edftrading",   "site": "EDFTrading",          "wd": "wd1"},  # ✅ confirmé (corrigé v15)
+    {"name": "Centrica",  "tenant": "centrica",      "site": "Centrica",            "wd": "wd3"},  # ✅ confirmé
 ]
 
 SMARTRECRUITERS_COMPANIES = [
@@ -437,8 +437,8 @@ def scrape_workday(company: dict) -> list[dict]:
 def scrape_workday_broad(company: dict) -> list[dict]:
     """
     Requête Workday sans searchText — 1 seul appel, limit=100, filtre local.
-    Certains tenants bloquent (réponse vide ou 403). Comparer avec scrape_workday().
-    Usage : test/benchmarking, pas encore le flux principal.
+    Certains tenants bloquent (réponse vide ou 403).
+    Usage : test/diagnostic uniquement — appelez manuellement si besoin.
     """
     url = (f"https://{company['tenant']}.{company['wd']}.myworkdayjobs.com"
            f"/wday/cxs/{company['tenant']}/{company['site']}/jobs")
@@ -630,7 +630,7 @@ def main():
     else:
         mode = "🚨 requests ONLY — RESULTATS INCOMPLETS (pip install playwright)"
     print("=" * 65)
-    print(f"🔍 JOB SCRAPER v12 — {mode}")
+    print(f"🔍 JOB SCRAPER v16 — {mode}")
     print(f"   Profil : Christophe D'Ippolito | Power focus")
     print(f"   Date   : {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 65)
@@ -661,18 +661,6 @@ def main():
             jobs = scrape_workday(co)
             print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
             all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(1)
-
-        # ── Test Workday broad — BP uniquement (1 req vs N queries) ──────────
-        print("\n── Workday broad test (BP) ──────────────────────────────────")
-        bp = next((co for co in WORKDAY_COMPANIES if co["name"] == "BP"), None)
-        if bp:
-            jobs_broad = scrape_workday_broad(bp)
-            bp_multi = summary.get("BP", 0)
-            if jobs_broad or bp_multi > 0:
-                status = "✅ résultats trouvés"
-            else:
-                status = "⚠️  0 partout — URL/site à vérifier"
-            print(f"   Broad (1 req) : {len(jobs_broad)} | Multi-query : {bp_multi} — {status}")
 
         print("\n── SmartRecruiters API ──────────────────────────────────────")
         for co in SMARTRECRUITERS_COMPANIES:
@@ -741,7 +729,7 @@ def main():
 
     # ── Export ────────────────────────────────────────────────────────────────
     ts = datetime.now().strftime('%Y%m%d_%H%M')
-    out = f"jobs_v12_{ts}.json"
+    out = f"jobs_v16_{ts}.json"
     with open(out, "w", encoding="utf-8") as f:
         json.dump(
             sorted(all_jobs, key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"])),
