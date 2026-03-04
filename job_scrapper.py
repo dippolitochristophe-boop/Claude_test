@@ -1,5 +1,5 @@
 """
-Job Scraper v16
+Job Scraper v17
 
 INSTALLATION (une seule fois) :
     pip install playwright requests beautifulsoup4
@@ -223,6 +223,31 @@ SITES = [
         "type": "html",
         "pages": ["https://jobs.engie.com/"],
         "job_pattern": "/job/",  # confirmé : jobs.engie.com/job/{title}/{id}-en_US/
+    },
+    # ── Commodity traders / bourses d'énergie ─────────────────────────────────
+    {
+        "name": "Glencore",
+        "type": "html",
+        "pages": ["https://www.glencore.com/careers/jobs"],
+        "job_pattern": "/careers/jobs/",  # /careers/jobs/{UUID-or-JR-ID}
+    },
+    {
+        "name": "EEX Group",
+        "type": "html",
+        "pages": ["https://career.deutsche-boerse.com/eex"],
+        "job_pattern": "/eex/job/",  # career.deutsche-boerse.com/eex/job/{loc}/{title}/{id}
+    },
+    {
+        "name": "Cargill Trading",
+        "type": "html",
+        "pages": ["https://careers.cargill.com/en/category/trading-jobs/23251/8144240/1"],
+        "job_pattern": "/en/job/",  # /en/job/{location}/{title}/23251/{id}
+    },
+    {
+        "name": "Danske Commodities",
+        "type": "html",
+        "pages": ["https://danskecommodities.com/vacancies"],
+        "job_pattern": "/Application/",  # careers.danskecommodities.com/Application/{id}
     },
 ]
 
@@ -630,7 +655,7 @@ def main():
     else:
         mode = "🚨 requests ONLY — RESULTATS INCOMPLETS (pip install playwright)"
     print("=" * 65)
-    print(f"🔍 JOB SCRAPER v16 — {mode}")
+    print(f"🔍 JOB SCRAPER v17 — {mode}")
     print(f"   Profil : Christophe D'Ippolito | Power focus")
     print(f"   Date   : {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 65)
@@ -729,7 +754,7 @@ def main():
 
     # ── Export ────────────────────────────────────────────────────────────────
     ts = datetime.now().strftime('%Y%m%d_%H%M')
-    out = f"jobs_v16_{ts}.json"
+    out = f"jobs_v17_{ts}.json"
     with open(out, "w", encoding="utf-8") as f:
         json.dump(
             sorted(all_jobs, key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"])),
