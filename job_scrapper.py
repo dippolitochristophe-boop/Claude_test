@@ -1,5 +1,5 @@
 """
-Job Scraper v18
+Job Scraper v20
 
 INSTALLATION (une seule fois) :
     pip install playwright requests beautifulsoup4
@@ -266,6 +266,19 @@ SITES = [
         "pages": ["https://careers.danskecommodities.com/Vacancies"],
         "job_pattern": "/Application/",  # /Application/{id} sur le même domaine careers.*
     },
+    # ── Pure traders ──────────────────────────────────────────────────────────
+    {
+        "name": "InCommodities",
+        "type": "html",
+        "pages": ["https://incommodities.com/join-us"],
+        "job_pattern": "*",  # root-level slugs (/algo-trader, /quantitative-developer-…) — filtrage par titre
+    },
+    {
+        "name": "Petroineos Trading",
+        "type": "html",
+        "pages": ["https://careers.petroineos.com/"],
+        "job_pattern": "/postings/",  # Ashby ATS — /postings/{uuid} et /en/postings/{uuid}
+    },
 ]
 
 # ── APIs JSON (Workday + SmartRecruiters) ─────────────────────────────────────
@@ -279,6 +292,7 @@ WORKDAY_COMPANIES = [
     {"name": "Orsted",    "tenant": "orsted",        "site": "OrstedCareers",       "wd": "wd3"},  # ❓ non confirmé — portail Workday non indexé
     {"name": "EDF Trading","tenant": "edftrading",   "site": "EDFTrading",          "wd": "wd1"},  # ✅ confirmé (corrigé v15)
     {"name": "Centrica",  "tenant": "centrica",      "site": "Centrica",            "wd": "wd3"},  # ✅ confirmé
+    {"name": "Castleton Commodities (CCI)", "tenant": "osv-cci", "site": "CCICareers", "wd": "wd1"},  # ✅ confirmé
 ]
 
 SMARTRECRUITERS_COMPANIES = [
@@ -665,7 +679,7 @@ def score_job(job: dict) -> int:
 # ── CLI args ──────────────────────────────────────────────────────────────────
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Job Scraper v19 — Power/Energy trading positions")
+    p = argparse.ArgumentParser(description="Job Scraper v20 — Power/Energy trading positions")
     p.add_argument("--new-only", action="store_true",
                    help="Affiche uniquement les offres nouvelles depuis le dernier run")
     p.add_argument("--no-html", action="store_true",
@@ -675,6 +689,7 @@ def parse_args():
     p.add_argument("--bucket", nargs="+", metavar="ZONE",
                    help="Filtre les résultats par zone géo (ex: --bucket London Switzerland)")
     return p.parse_args()
+
 
 
 def filter_companies(lst: list, names) -> list:
@@ -777,7 +792,7 @@ def generate_html_report(jobs: list, new_urls: set = None) -> str:
 </head>
 <body>
   <div class="header">
-    <h1>🔍 Job Scraper v19 — Christophe D'Ippolito</h1>
+    <h1>🔍 Job Scraper v20 — Christophe D'Ippolito</h1>
     <p>{len(jobs)} offres{new_count_str} · {date_str}</p>
   </div>
   {buckets_html}
@@ -809,7 +824,7 @@ def main():
     else:
         mode = "🚨 requests ONLY — RESULTATS INCOMPLETS (pip install playwright)"
     print("=" * 65)
-    print(f"🔍 JOB SCRAPER v19 — {mode}")
+    print(f"🔍 JOB SCRAPER v20 — {mode}")
     print(f"   Profil : Christophe D'Ippolito | Power focus")
     print(f"   Date   : {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 65)
@@ -946,7 +961,7 @@ def main():
 
     # ── Export JSON ───────────────────────────────────────────────────────────
     ts = datetime.now().strftime('%Y%m%d_%H%M')
-    out = f"jobs_v19_{ts}.json"
+    out = f"jobs_v20_{ts}.json"
     with open(out, "w", encoding="utf-8") as f:
         json.dump(
             sorted(display_jobs, key=lambda x: (BUCKET_ORDER.index(x["bucket"]), -x["score"])),
