@@ -36,7 +36,7 @@ except ImportError:
     print("=" * 65)
     print("  🚨 PLAYWRIGHT NON INSTALLE — RESULTATS INCOMPLETS 🚨")
     print("  Societes manquantes : TotalEnergies, Mercuria, EDF Trading,")
-    print("  Statkraft, BP, Hartree, Freepoint, MET Group...")
+    print("  Orsted, BP, Hartree, Freepoint, MET Group...")
     print("  Estimation : ~50% des offres ne seront pas trouvees.")
     print("")
     print("  SOLUTION : pip install playwright")
@@ -195,12 +195,7 @@ SITES = [
         "pages": ["https://www.hartreepartners.com/about/careers/"],
         "job_pattern": "/careers/",
     },
-    {
-        "name": "Statkraft",
-        "type": "html",
-        "pages": ["https://www.statkraft.com/careers/open-positions/"],
-        "job_pattern": "/careers/jobs/",
-    },
+    # Statkraft → déplacé dans SMARTRECRUITERS_COMPANIES (sr_id: statkraft1)
     # BP → Workday (voir WORKDAY_COMPANIES — doublon supprimé ici)
     # TotalEnergies → Taleo (voir TALEO_SITES)
     # ── Genève / Londres ──────────────────────────────────────────────────────
@@ -238,16 +233,19 @@ SITES = [
     {
         "name": "ENGIE",
         "type": "html",
-        "pages": ["https://jobs.engie.com/"],
-        "job_pattern": "/job/",  # confirmé : jobs.engie.com/job/{title}/{id}-en_US/
+        # Phenom People platform — homepage ne liste pas les jobs, utiliser search URLs
+        # Pattern confirmé : jobs.engie.com/job/{title}/{id}-en_US/
+        "pages": [
+            "https://jobs.engie.com/search/?q=power+trader",
+            "https://jobs.engie.com/search/?q=energy+trader",
+            "https://jobs.engie.com/search/?q=trading+risk",
+            "https://jobs.engie.com/search/?q=portfolio+manager",
+            "https://jobs.engie.com/search/?q=origination",
+        ],
+        "job_pattern": "/job/",
     },
     # ── Commodity traders / bourses d'énergie ─────────────────────────────────
-    {
-        "name": "Glencore",
-        "type": "html",
-        "pages": ["https://www.glencore.com/careers/jobs"],
-        "job_pattern": "/careers/jobs/",  # /careers/jobs/{UUID-or-JR-ID}
-    },
+    # Glencore → déplacé dans WORKDAY_COMPANIES (tenant: glencore, site: External, wd3)
     {
         "name": "EEX Group",
         "type": "html",
@@ -265,6 +263,14 @@ SITES = [
         "type": "html",
         "pages": ["https://careers.danskecommodities.com/Vacancies"],
         "job_pattern": "/Application/",  # /Application/{id} sur le même domaine careers.*
+    },
+    # ── Portails HTML custom ──────────────────────────────────────────────────
+    {
+        "name": "Orsted",
+        "type": "html",
+        # Portail propre — PAS Workday. Pattern confirmé : /en/careers/vacancies-list/{year}/{month}/{id}-{title}
+        "pages": ["https://orsted.com/en/careers/vacancies-list"],
+        "job_pattern": "/vacancies-list/",
     },
     # ── Pure traders ──────────────────────────────────────────────────────────
     {
@@ -289,7 +295,8 @@ WORKDAY_COMPANIES = [
     {"name": "Shell",     "tenant": "shell",         "site": "ShellCareers",        "wd": "wd3"},  # ✅ confirmé
     {"name": "BP",        "tenant": "bpinternational","site": "bpCareers",           "wd": "wd3"},  # ✅ confirmé (corrigé v15)
     {"name": "Equinor",   "tenant": "equinor",       "site": "EQNR",                "wd": "wd3"},  # ✅ confirmé
-    {"name": "Orsted",    "tenant": "orsted",        "site": "OrstedCareers",       "wd": "wd3"},  # ❓ non confirmé — portail Workday non indexé
+    # Orsted → déplacé dans SITES (portail HTML custom orsted.com/en/careers/vacancies-list)
+    {"name": "Glencore",  "tenant": "glencore",      "site": "External",            "wd": "wd3"},  # ✅ confirmé glencore.wd3.myworkdayjobs.com/External
     {"name": "EDF Trading","tenant": "edftrading",   "site": "EDFTrading",          "wd": "wd1"},  # ✅ confirmé (corrigé v15)
     {"name": "Centrica",  "tenant": "centrica",      "site": "Centrica",            "wd": "wd3"},  # ✅ confirmé
     {"name": "Castleton Commodities (CCI)", "tenant": "osv-cci", "site": "CCICareers", "wd": "wd1"},  # ✅ confirmé
@@ -298,9 +305,10 @@ WORKDAY_COMPANIES = [
 SMARTRECRUITERS_COMPANIES = [
     {"name": "Vattenfall", "sr_id": "Vattenfall"},  # confirmé : careers.smartrecruiters.com/vattenfall
     {"name": "Vitol",      "sr_id": "Vitol"},       # confirmé : jobs.smartrecruiters.com/Vitol/...
+    {"name": "Statkraft",  "sr_id": "statkraft1"},  # ✅ confirmé : careers.smartrecruiters.com/statkraft1
     # RWE   → déplacé dans SITES (portail HTML propre, pas SmartRecruiters)
     # Uniper → déplacé dans SITES (portail iCIMS careers.uniper.energy)
-    # ENGIE  → déplacé dans SITES (portail jobs.engie.com)
+    # ENGIE  → dans SITES (portail Phenom People jobs.engie.com)
 ]
 
 

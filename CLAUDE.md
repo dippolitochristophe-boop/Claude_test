@@ -33,12 +33,12 @@
 | CCI | Workday | ✅ OK (wd1, osv-cci) | fait v20 |
 | RWE | HTML | ✅ OK | — |
 | Uniper | HTML | ✅ OK | — |
-| ENGIE | HTML | ❌ 0 résultat | à diagnostiquer |
-| Glencore | HTML | ❌ 0 résultat | à diagnostiquer |
-| Statkraft | HTML | ❌ 0 résultat | à diagnostiquer |
+| ENGIE | HTML (Phenom) | 🔧 URLs search ajoutées | à tester |
+| Glencore | Workday | ✅ corrigé — tenant glencore/External/wd3 | fait |
+| Statkraft | SmartRecruiters | ✅ corrigé — sr_id statkraft1 | fait |
 | InCommodities | HTML | ✅ OK | fait v20 |
 | Petroineos | HTML | ✅ OK | fait v20 |
-| Orsted | Workday | ❓ non confirmé | bloqué |
+| Orsted | HTML (portail custom) | ✅ corrigé — /vacancies-list/ | fait |
 | SEFE M&T | HTML | ❓ ATS inconnu | bloqué |
 
 ---
