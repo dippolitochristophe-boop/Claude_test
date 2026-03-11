@@ -6,6 +6,56 @@ depuis plusieurs ATS : Workday, SmartRecruiters, Taleo, et scraping HTML direct.
 
 ---
 
+## Stratégie globale : 2 streams en co-construction
+
+```
+STREAM 1 (Recherche)          STREAM 2 (Implémentation)
+─────────────────────         ─────────────────────────
+Agents WebSearch              Modification job_scrapper.py
+→ vérifient configs ATS  →→→  → basée UNIQUEMENT sur résultats ✅ confirmés
+→ écrivent /tmp/*.md          → commit + push sur la branche
+→ statut: ✅ ❌ ❓
+```
+
+### Règle d'or : JAMAIS d'implémentation sans vérification préalable
+- **Stream 1 AVANT Stream 2** : on ne touche au code que si le statut est ✅
+- Les ❓ INCONNU restent en attente — ne pas les coder à l'aveugle
+- Les ❌ WRONG sont corrigés dans le code avec la valeur vérifiée
+
+### État d'avancement (mis à jour à chaque session)
+
+#### Vérifications terminées (Stream 1 → prêt pour Stream 2)
+| Entreprise | ATS | Statut | Action code |
+|------------|-----|--------|-------------|
+| Trafigura | Workday | ✅ OK | rien |
+| Gunvor | Workday | ✅ OK | rien |
+| Shell | Workday | ✅ OK | rien |
+| BP | Workday | ✅ corrigé v15 | fait |
+| Equinor | Workday | ✅ OK | rien |
+| EDF Trading | Workday | ✅ corrigé v15 | fait |
+| Centrica | Workday | ✅ OK | rien |
+| CCI | Workday | ✅ OK (wd1, osv-cci) | fait v20 |
+| RWE | HTML | ✅ OK | rien |
+| Uniper | HTML | ✅ OK | rien |
+| ENGIE | HTML | ✅ OK | rien |
+| InCommodities | HTML | ✅ OK | fait v20 |
+| Petroineos | HTML | ✅ OK (/postings/) | fait v20 |
+
+#### En attente de vérification (Stream 1 non terminé)
+| Entreprise | ATS actuel | Problème |
+|------------|-----------|----------|
+| Orsted | Workday ❓ | portail non indexé — peut-être pas Workday |
+| SEFE M&T | HTML ❓ | ATS backend inconnu |
+
+#### Entreprises à ajouter (non encore dans le scraper)
+| Entreprise | ATS pressenti | À vérifier |
+|------------|--------------|------------|
+| TotalEnergies | Taleo ✅ (déjà dans TALEO_SITES) | — |
+| Vattenfall | SmartRecruiters ✅ | — |
+| Vitol | SmartRecruiters ✅ | — |
+
+---
+
 ## Règles impératives pour tout lancement d'agent
 
 ### 1. Toujours borner avec `max_turns`
@@ -51,6 +101,21 @@ Pour chaque [item], écris IMMÉDIATEMENT le résultat dans /tmp/<task>.md :
 
 Puis passe au suivant.
 Max X turns.
+```
+
+---
+
+## Workflow type d'une session
+
+```
+1. Lire cet état d'avancement (tableau ci-dessus)
+2. Identifier ce qui est EN ATTENTE de vérification
+3. Lancer Stream 1 (agents WebSearch, max 3 en parallèle, 2-3 entreprises chacun)
+4. Lire les résultats /tmp/*.md
+5. Mettre à jour le tableau d'état ci-dessus
+6. Lancer Stream 2 : modifier job_scrapper.py uniquement pour les ✅
+7. Commit + push
+8. Répéter
 ```
 
 ---
