@@ -1,35 +1,26 @@
 # Claude Code — Règles de développement
 
-## Vision : 2 streams en co-construction
-
-```
-Stream 1 (perso, court terme)     Stream 2 (produit, moyen terme)
-──────────────────────────────    ────────────────────────────────
-Python scraper local              Site web + agents IA
-→ meilleures offres chaque        → user entre son profil
-  semaine pour TOI                → reçoit ses offres
-→ hardcodé, cron, local           → auto-discovery, paramétrable
-                                  → infra web + paiement
-         ↓ alimente ↑
-Chaque boîte fixée en S1 = cas de test pour valider que l'agent S2
-la redécouvre tout seul correctement
-```
+## Vision : 2 streams
 
 ---
 
-## Stream 1 — Python perso
+## Stream 1 — Scraper Python perso (court terme)
 
-**Objectif** : avoir les meilleures offres energy/trading chaque semaine.
+**Objectif** : toi tu as les meilleures offres energy/trading chaque semaine.
 
-### Backlog Stream 1
+- Hardcodé, tourne en local ou cron
+- Fixer les boîtes à 0 résultat, élargir la liste, affiner le scoring
+- C'est ton outil perso, pas un produit
+
+### Backlog
 | Priorité | Tâche | Statut |
 |----------|-------|--------|
-| 🔴 | Fixer les boîtes à 0 résultat (ENGIE, Glencore, Statkraft...) | en attente |
+| 🔴 | Diagnostiquer boîtes à 0 résultat (ENGIE, Glencore, Statkraft...) | en attente |
 | 🟡 | Élargir la liste (qu'est-ce qui manque autour de Trafigura Geneva ?) | en attente |
-| 🟡 | Affiner le scoring pour le profil utilisateur | en attente |
+| 🟡 | Affiner le scoring pour ton profil | en attente |
 | 🟢 | Cron / automatisation locale | en attente |
 
-### État des configs ATS (vérifiées)
+### État des configs ATS
 | Entreprise | ATS | Statut | Action code |
 |------------|-----|--------|-------------|
 | Trafigura | Workday | ✅ OK | — |
@@ -46,37 +37,52 @@ la redécouvre tout seul correctement
 | Glencore | HTML | ❌ 0 résultat | à diagnostiquer |
 | Statkraft | HTML | ❌ 0 résultat | à diagnostiquer |
 | InCommodities | HTML | ✅ OK | fait v20 |
-| Petroineos | HTML | ✅ OK (/postings/) | fait v20 |
-| Orsted | Workday | ❓ non confirmé | bloquer |
-| SEFE M&T | HTML | ❓ ATS inconnu | bloquer |
+| Petroineos | HTML | ✅ OK | fait v20 |
+| Orsted | Workday | ❓ non confirmé | bloqué |
+| SEFE M&T | HTML | ❓ ATS inconnu | bloqué |
 
 ---
 
-## Stream 2 — Produit commercial
+## Stream 2 — Produit commercial (moyen terme)
 
-**Objectif** : un user entre son profil → reçoit ses offres pertinentes.
+**Objectif** : un user quelconque entre son profil → reçoit ses offres pertinentes.
 
-### Vision produit
-- **Agent Discovery** : trouve automatiquement le portail carrières d'une entreprise + identifie l'ATS
-- **Paramétrable** : profil utilisateur (secteur, rôle, localisation, séniorité) — pas hardcodé
-- **Infrastructure** : site web, auth, paiement
-- **Fiabilité industrielle** : monitoring, fallbacks, alertes
+### Les 2 agents à construire
+
+#### Agent 1 — Discovery
+```
+Input  : profil utilisateur (secteur, rôle, localisation, séniorité)
+Process: WebSearch → "energy/power trading companies Europe" + variantes
+         → extrait noms d'entreprises → déduplique → filtre pertinence
+Output : liste de 100+ boîtes correspondant au profil
+```
+
+#### Agent 2 — Config Generator
+```
+Input  : nom d'une entreprise (ex: "Trafigura")
+Process: WebSearch + WebFetch → identifie ATS utilisé (Workday/SR/Taleo/HTML)
+         → trouve URL carrières + job_pattern
+         → génère le bloc de config Python
+         → valide (vérifie que l'URL retourne bien des offres)
+Output : bloc de config prêt à l'emploi
+         ex: {"name": "Trafigura", "tenant": "trafigura", "site": "TrafiguraCareerSite", "wd": "wd3"}
+```
+
+### Lien S1 → S2
+Les configs hardcodées de S1 = **ground truth** pour valider Agent 2 :
+```
+Agent 2 input : "Trafigura"
+Expected      : {tenant: "trafigura", site: "TrafiguraCareerSite", wd: "wd3"}  ← S1 le sait déjà
+```
 
 ### Backlog Stream 2
 | Priorité | Tâche | Statut |
 |----------|-------|--------|
-| 🔴 | Prototyper Agent Discovery (donner une entreprise → trouve l'ATS et la config) | en attente |
-| 🟡 | Valider avec les boîtes déjà connues de S1 (cas de test) | en attente |
-| 🟡 | Définir le modèle de données profil utilisateur | en attente |
-| 🟢 | Infra web (stack à choisir) | en attente |
-| 🟢 | Système de paiement | en attente |
-
-### Lien S1 → S2
-Chaque entreprise fixée dans S1 devient un **cas de test** :
-```
-input: "Trafigura"
-expected output: {type: "workday", tenant: "trafigura", site: "TrafiguraCareerSite", wd: "wd3"}
-```
+| 🔴 | Prototyper Agent 2 (Config Generator) sur 3 boîtes connues | en attente |
+| 🔴 | Prototyper Agent 1 (Discovery) → liste de boîtes energy EU | en attente |
+| 🟡 | Chaîner Agent 1 → Agent 2 (pipeline complet) | en attente |
+| 🟡 | Paramétrer par profil utilisateur | en attente |
+| 🟢 | Infrastructure web + auth + paiement | en attente |
 
 ---
 
@@ -106,13 +112,9 @@ N'attends pas la fin — écris au fur et à mesure.
 - source: ...
 ```
 
-### 5. Jamais d'implémentation sans vérification
-- Stream 1 : on ne code que les ✅
-- Stream 2 : chaque feature validée par un cas de test S1
-
 ---
 
-## Architecture du scraper (Stream 1)
+## Architecture du scraper S1
 
 ### ATS supportés
 | Variable | Type | Méthode |
@@ -136,10 +138,7 @@ N'attends pas la fin — écris au fur et à mesure.
 ### Ajouter une entreprise SmartRecruiters
 ```python
 {"name": "Company", "sr_id": "CompanyId"}
-# Vérifier : https://jobs.smartrecruiters.com/{sr_id}/
 ```
-
----
 
 ## Environnement d'exécution
 - **Proxy** : pas de connexion directe à `*.myworkdayjobs.com` — utiliser `WebSearch`
