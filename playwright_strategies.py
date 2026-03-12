@@ -84,15 +84,29 @@ JOB_URL_KEYS    = ["url", "link", "absoluteUrl", "absolute_url", "externalPath",
 JOB_LOC_KEYS    = ["location", "city", "locationName", "locationsText", "place"]
 
 
-def _dismiss_cookie_consent(page, timeout_ms: int = 2000) -> str:
+def _dismiss_cookie_consent(page) -> str:
     """
-    Essaie tous les selectors cookie consent dans l'ordre.
-    Retourne le selector qui a fonctionné, ou '' si aucun.
+    Tente d'accepter le cookie consent via un sélecteur CSS combiné (1 seul appel),
+    puis fallback sur les patterns texte Playwright si rien trouvé.
+    Retourne le selector qui a fonctionné, ou ''.
     """
-    for sel in COOKIE_SELECTORS:
+    # Sélecteurs CSS stricts → 1 seul wait_for_selector combiné (rapide)
+    CSS_SELECTORS = [s for s in COOKIE_SELECTORS if not s.startswith("button:has-text")]
+    combined = ", ".join(CSS_SELECTORS)
+    try:
+        page.wait_for_selector(combined, timeout=1500)
+        el = page.query_selector(combined)
+        if el:
+            el.click()
+            page.wait_for_timeout(600)
+            return combined
+    except Exception:
+        pass
+    # Fallback : sélecteurs texte (has-text) — 300ms chacun
+    for sel in [s for s in COOKIE_SELECTORS if s.startswith("button:has-text")]:
         try:
-            page.click(sel, timeout=timeout_ms)
-            page.wait_for_timeout(800)
+            page.click(sel, timeout=300)
+            page.wait_for_timeout(600)
             return sel
         except Exception:
             continue
@@ -113,26 +127,31 @@ def _navigate(page, url: str) -> str:
     return "error"
 
 
-def _wait_for_jobs_dom(page, wait_for: str | None, extra_patterns: bool = True) -> str:
+def _wait_for_jobs_dom(page, wait_for: str | None) -> str:
     """
     Attend que des job links apparaissent dans le DOM.
-    Essaie le wait_for de la config, puis les patterns génériques.
-    Retourne le selector qui a trouvé quelque chose, ou ''.
+    Utilise 1 sélecteur CSS combiné pour tous les patterns (rapide).
+    Retourne le premier sélecteur qui matche, ou ''.
     """
-    candidates = []
+    # Priorité au wait_for de la config
     if wait_for:
-        candidates.append(wait_for)
-    if extra_patterns:
-        candidates.extend(JOB_LINK_PATTERNS)
-
-    for sel in candidates:
         try:
-            page.wait_for_selector(sel, timeout=8000)
-            # Vérifie qu'il y en a vraiment
-            if page.query_selector_all(sel):
-                return sel
+            page.wait_for_selector(wait_for, timeout=6000)
+            if page.query_selector_all(wait_for):
+                return wait_for
         except Exception:
-            continue
+            pass
+
+    # Sélecteur combiné → 1 seul appel réseau au lieu de 10
+    combined = ", ".join(JOB_LINK_PATTERNS)
+    try:
+        page.wait_for_selector(combined, timeout=6000)
+        # Trouve lequel a matché
+        for sel in JOB_LINK_PATTERNS:
+            if page.query_selector(sel):
+                return sel
+    except Exception:
+        pass
     return ""
 
 
@@ -313,10 +332,6 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None) -> tuple[list[d
 
             # ── Étape 4 : attente DOM jobs ────────────────────────────────────
             found_sel = _wait_for_jobs_dom(pw_page, site.get("wait_for"))
-            if not found_sel:
-                # Attente supplémentaire si aucun lien trouvé (hydration lente)
-                pw_page.wait_for_timeout(5000)
-                found_sel = _wait_for_jobs_dom(pw_page, None, extra_patterns=True)
 
             # ── Étape 5 : parse DOM ───────────────────────────────────────────
             dom_jobs = parse_jobs_from_html(pw_page.content(), site)
