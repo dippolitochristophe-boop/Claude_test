@@ -231,13 +231,7 @@ SITES = [
         "job_pattern": "/job-offers/details/",
         "wait_for": "a[href*='/job-offers/details/']",  # SPA : attendre injection DOM
     },
-    {
-        "name": "Uniper",
-        "type": "html",
-        "pages": ["https://careers.uniper.energy/en"],  # Next.js SPA — /en/search/ est une 404
-        "job_pattern": "/job/",  # pattern Next.js : /en/job/...
-        "wait_for": "a[href*='/job/']",  # attendre injection DOM client-side
-    },
+    # Uniper → déplacé vers scrape_uniper() (Next.js custom API /api/filter/query)
     {
         "name": "ENGIE",
         "type": "html",
@@ -644,6 +638,64 @@ def scrape_greenhouse(company: dict) -> list[dict]:
     return jobs
 
 
+# ── Uniper (Next.js custom API) ───────────────────────────────────────────────
+
+def scrape_uniper() -> list[dict]:
+    """Scraper Uniper — POST /api/filter/query, pagination par page."""
+    jobs = []
+    seen = set()
+    base = "https://careers.uniper.energy"
+    api_url = f"{base}/api/filter/query"
+    page = 0
+    while True:
+        payload = {"searchQuery": "", "filter": {}, "subclient": "uniper", "locale": "en", "page": page}
+        try:
+            r = requests.post(api_url, json=payload, headers={**HEADERS, "Content-Type": "application/json"},
+                              timeout=15, verify=False)
+            if r.status_code != 200:
+                print(f"   ↳ HTTP {r.status_code} page {page}")
+                break
+            body = r.json()
+        except Exception as e:
+            print(f"   ↳ erreur réseau : {str(e)[:60]}")
+            break
+
+        for job in body.get("jobs", []):
+            d = job.get("data", {})
+            title = (d.get("title") or d.get("jobTitle") or d.get("name") or "").strip()
+            # URL : champ direct ou reconstruction depuis slug+id
+            url = d.get("url") or d.get("link") or d.get("absoluteUrl") or ""
+            if not url:
+                slug = d.get("slug") or d.get("urlSlug") or ""
+                job_id = d.get("id") or d.get("jobId") or d.get("objectID") or ""
+                if slug and job_id:
+                    url = f"{base}/en/job/{slug}/{job_id}"
+            location = (d.get("location") or d.get("city") or d.get("locationName") or "").strip()
+            if isinstance(location, dict):
+                location = location.get("name") or location.get("city") or ""
+            job_id_key = str(d.get("id") or d.get("jobId") or d.get("objectID") or url)
+            if title and job_id_key not in seen and is_relevant_title(title):
+                seen.add(job_id_key)
+                jobs.append({
+                    "title": title,
+                    "company": "Uniper",
+                    "location": location,
+                    "bucket": get_location_bucket(location),
+                    "description": "",
+                    "url": url,
+                    "date": (d.get("publicationDate") or d.get("date") or "")[:10],
+                    "source": "Uniper API",
+                    "score": 0,
+                })
+
+        next_page = body.get("nextPage")
+        if next_page is None or next_page == page:
+            break
+        page = next_page
+
+    return jobs
+
+
 # ── Oracle Taleo (TotalEnergies, Macquarie Group) ────────────────────────────
 # Même structure ATS Oracle Taleo : SearchJobs/{query} + JobDetail/{id}
 
@@ -888,9 +940,10 @@ def main():
     sr_cos         = filter_companies(SMARTRECRUITERS_COMPANIES, args.company)
     taleo_cos      = filter_companies(TALEO_SITES,               args.company)
     greenhouse_cos = filter_companies(GREENHOUSE_COMPANIES,      args.company)
+    run_uniper     = not args.company or any(c.lower() in ("uniper",) for c in args.company)
 
     if args.company:
-        found = len(sites) + len(workday_cos) + len(sr_cos) + len(taleo_cos) + len(greenhouse_cos)
+        found = len(sites) + len(workday_cos) + len(sr_cos) + len(taleo_cos) + len(greenhouse_cos) + (1 if run_uniper else 0)
         print(f"🔎 Filtre --company : {', '.join(args.company)} → {found} société(s) retenue(s)")
 
     if PLAYWRIGHT_AVAILABLE:
@@ -949,6 +1002,13 @@ def main():
             jobs = scrape_smartrecruiters(co)
             print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
             all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(1)
+
+        if run_uniper:
+            print("\n── Uniper API ───────────────────────────────────────────────")
+            print("🏢 Uniper...", end=" ", flush=True)
+            jobs = scrape_uniper()
+            print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
+            all_jobs.extend(jobs); summary["Uniper"] = len(jobs)
 
         print("\n── Greenhouse API ───────────────────────────────────────────")
         for co in greenhouse_cos:
