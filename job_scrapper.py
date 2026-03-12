@@ -192,6 +192,9 @@ SITES = [
     {
         "name": "Hartree Partners",
         "type": "html",
+        # hartreepartners.com → 403 Cloudflare systématique (requests + WebFetch).
+        # ATS non identifié : Greenhouse/Lever/Workday/Ashby/SmartRecruiters → aucun résultat public.
+        # ACTION REQUISE : ouvrir dans Chrome DevTools → Network → identifier l'ATS embarqué.
         "pages": ["https://www.hartreepartners.com/about/careers/"],
         "job_pattern": "/careers/",
     },
@@ -202,7 +205,10 @@ SITES = [
     {
         "name": "Mercuria",
         "type": "html",
-        "pages": ["https://www.mercuria.com/careers/"],
+        # www.mercuria.com → 403 bots. mercuria.com (sans www) aussi bloqué via requests/WebFetch.
+        # Pattern /job/ correct (confirmé : mercuria.com/job/vacancy-2025-xxx/).
+        # Playwright (real browser) est la seule chance de bypass.
+        "pages": ["https://mercuria.com/careers/"],
         "job_pattern": "/job/",
     },
     {
