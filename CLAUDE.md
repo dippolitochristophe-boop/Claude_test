@@ -47,7 +47,7 @@
 
 **Objectif** : un user quelconque entre son profil → reçoit ses offres pertinentes.
 
-### Les 2 agents à construire
+### Les 3 agents à construire
 
 #### Agent 1 — Discovery
 ```
@@ -63,9 +63,28 @@ Input  : nom d'une entreprise (ex: "Trafigura")
 Process: WebSearch + WebFetch → identifie ATS utilisé (Workday/SR/Taleo/HTML)
          → trouve URL carrières + job_pattern
          → génère le bloc de config Python
-         → valide (vérifie que l'URL retourne bien des offres)
-Output : bloc de config prêt à l'emploi
+Output : bloc de config candidat
          ex: {"name": "Trafigura", "tenant": "trafigura", "site": "TrafiguraCareerSite", "wd": "wd3"}
+```
+
+#### Agent 3 — Validator (Health Check)
+```
+Input  : config (générée par Agent 2, ou config existante S1)
+Process: hit l'endpoint sans aucun filtre métier
+         → "donne-moi n'importe quelle offre"
+         → vérifie qu'on reçoit ≥ 1 résultat
+Output : ✅ OK (N offres trouvées) / ❌ BROKEN (0 résultats + raison probable)
+```
+
+**Double usage de l'Agent 3 :**
+- **Pipeline S2** : certifie les configs générées par Agent 2 avant de les ajouter au pool
+- **Cron S1** : health-check périodique sur les configs existantes → détecte les régressions
+
+**Pipeline complet S2 :**
+```
+Agent 1 → liste de boîtes
+    → pour chaque boîte : Agent 2 → config candidate
+        → Agent 3 → ✅ ajouter au pool / ❌ rejeter + logger
 ```
 
 ### Lien S1 → S2
@@ -75,12 +94,19 @@ Agent 2 input : "Trafigura"
 Expected      : {tenant: "trafigura", site: "TrafiguraCareerSite", wd: "wd3"}  ← S1 le sait déjà
 ```
 
+Agent 3 sur S1 = solution directe au 🔴 "Diagnostiquer boîtes à 0 résultat" :
+```
+ENGIE    → ❌ 0 résultats → raison : URL search incorrecte
+Statkraft → ✅ 3 offres   → OK
+```
+
 ### Backlog Stream 2
 | Priorité | Tâche | Statut |
 |----------|-------|--------|
 | 🔴 | Prototyper Agent 2 (Config Generator) sur 3 boîtes connues | en attente |
 | 🔴 | Prototyper Agent 1 (Discovery) → liste de boîtes energy EU | en attente |
-| 🟡 | Chaîner Agent 1 → Agent 2 (pipeline complet) | en attente |
+| 🔴 | Prototyper Agent 3 (Validator) → health-check sur configs S1 existantes | en attente |
+| 🟡 | Chaîner Agent 1 → Agent 2 → Agent 3 (pipeline complet) | en attente |
 | 🟡 | Paramétrer par profil utilisateur | en attente |
 | 🟢 | Infrastructure web + auth + paiement | en attente |
 
