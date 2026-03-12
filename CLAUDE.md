@@ -101,7 +101,8 @@ N'attends pas la fin — écris au fur et à mesure.
 
 ### 3. Paralléliser (un agent = une tâche atomique)
 - Max 2-3 entreprises par agent
-- Max 5 agents en parallèle (`run_in_background=True`)
+- **Max 2 agents en parallèle** (`run_in_background=True`) — au-delà, on hit les rate limits
+- Attendre la fin des agents en cours avant d'en lancer de nouveaux
 
 ### 4. Format résultats intermédiaires
 ```markdown
