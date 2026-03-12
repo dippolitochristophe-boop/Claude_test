@@ -75,7 +75,9 @@ with sync_playwright() as p:
             print(f"    jobs[0] keys: {list(jobs[0].keys()) if jobs else 'N/A'}")
             if jobs:
                 j = jobs[0]
-                print(f"    exemple job: title={j.get('title')} | url={j.get('url') or j.get('link') or j.get('slug')}")
+                data = j.get("data", {})
+                print(f"    jobs[0]['data'] keys: {list(data.keys())}")
+                print(f"    jobs[0]['data'] sample: {json.dumps(data, ensure_ascii=False)[:600]}")
         else:
             print(f"  [{status}] {url[:100]}")
 
