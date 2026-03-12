@@ -29,6 +29,7 @@ SEEN_FILE = ".jobs_seen.json"
 
 try:
     from playwright.sync_api import sync_playwright
+    from playwright_strategies import smart_scrape_site
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
@@ -393,59 +394,17 @@ def parse_jobs_from_html(html: str, site: dict) -> list[dict]:
 
 def scrape_site(site: dict, pw_page=None) -> list[dict]:
     """
-    Scrape un site HTML.
-    pw_page : page Playwright déjà ouverte (browser unique pour tout le run).
-    Si pw_page=None → fallback requests directement.
+    Scrape un site HTML via smart_scrape_site (multi-stratégies).
+    pw_page : page Playwright déjà ouverte. None → fallback requests.
     """
-    all_jobs = []
-    seen = set()
-
-    for url in site["pages"]:
+    if PLAYWRIGHT_AVAILABLE:
+        jobs, strategy = smart_scrape_site(site, pw_page, headers=HEADERS)
+    else:
         jobs = []
-
-        # ── Playwright (page passée depuis le browser global) ──────────────
-        if pw_page is not None:
-            try:
-                try:
-                    pw_page.goto(url, wait_until="networkidle", timeout=30000)
-                except Exception:
-                    # networkidle peut ne jamais se déclencher sur les SPAs
-                    pw_page.goto(url, wait_until="load", timeout=30000)
-                # Scroll progressif pour déclencher le lazy-loading
-                for _ in range(3):
-                    pw_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    pw_page.wait_for_timeout(700)
-                # SPAs (iCIMS, Phenom, etc.) : attendre que les liens jobs apparaissent dans le DOM
-                wait_for = site.get("wait_for")
-                if wait_for:
-                    try:
-                        pw_page.wait_for_selector(wait_for, timeout=10000)
-                    except Exception:
-                        pass  # timeout = 0 offres ou ATS non responsive, on parse quand même
-                else:
-                    pw_page.wait_for_timeout(1000)
-                jobs = parse_jobs_from_html(pw_page.content(), site)
-                for j in jobs:
-                    j["source"] = "Playwright"
-                if not jobs:
-                    print(f"     ↳ Playwright OK — 0 lien '{site['job_pattern']}' trouvé → rendu SPA? job_pattern à revoir?")
-            except Exception as e:
-                print(f"     ⚠️  Playwright fail → requests ({str(e)[:70]})")
-                jobs = _get_jobs_requests(url, site)
-
-        # ── Fallback requests ──────────────────────────────────────────────
-        else:
-            jobs = _get_jobs_requests(url, site)
-
-        for j in jobs:
-            dedup = j["url"].split("?")[0].rstrip("/")
-            if dedup not in seen:
-                seen.add(dedup)
-                all_jobs.append(j)
-
-        time.sleep(0.8)
-
-    return all_jobs
+        for url in site["pages"]:
+            jobs.extend(_get_jobs_requests(url, site))
+        strategy = "requests"
+    return jobs
 
 
 def _get_jobs_requests(url: str, site: dict) -> list[dict]:
