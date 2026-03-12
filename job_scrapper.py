@@ -229,12 +229,14 @@ SITES = [
         "type": "html",
         "pages": ["https://www.rwe.com/en/rwe-careers-portal/job-offers/"],
         "job_pattern": "/job-offers/details/",
+        "wait_for": "a[href*='/job-offers/details/']",  # SPA : attendre injection DOM
     },
     {
         "name": "Uniper",
         "type": "html",
         "pages": ["https://careers.uniper.energy/en"],
         "job_pattern": "/job/",  # iCIMS — pattern typique /job/Job-Title/JOBID/
+        "wait_for": "a[href*='/job/']",  # SPA iCIMS : attendre injection DOM avant parse
     },
     {
         "name": "ENGIE",
@@ -249,6 +251,7 @@ SITES = [
             "https://jobs.engie.com/search/?q=origination",
         ],
         "job_pattern": "/job/",
+        "wait_for": "a[href*='/job/']",  # Phenom People SPA : attendre injection DOM
     },
     # ── Commodity traders / bourses d'énergie ─────────────────────────────────
     # Glencore → déplacé dans GREENHOUSE_COMPANIES (Greenhouse EU : glencoreuk + tlgglencorebaar)
@@ -257,6 +260,7 @@ SITES = [
         "type": "html",
         "pages": ["https://career.deutsche-boerse.com/eex"],
         "job_pattern": "/eex/job/",  # career.deutsche-boerse.com/eex/job/{loc}/{title}/{id}
+        "wait_for": "a[href*='/eex/job/']",  # SPA Deutsche Börse : attendre injection DOM
     },
     {
         "name": "Cargill Trading",
@@ -417,7 +421,15 @@ def scrape_site(site: dict, pw_page=None) -> list[dict]:
                 for _ in range(3):
                     pw_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                     pw_page.wait_for_timeout(700)
-                pw_page.wait_for_timeout(1000)
+                # SPAs (iCIMS, Phenom, etc.) : attendre que les liens jobs apparaissent dans le DOM
+                wait_for = site.get("wait_for")
+                if wait_for:
+                    try:
+                        pw_page.wait_for_selector(wait_for, timeout=10000)
+                    except Exception:
+                        pass  # timeout = 0 offres ou ATS non responsive, on parse quand même
+                else:
+                    pw_page.wait_for_timeout(1000)
                 jobs = parse_jobs_from_html(pw_page.content(), site)
                 for j in jobs:
                     j["source"] = "Playwright"
