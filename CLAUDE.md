@@ -39,7 +39,7 @@
 | InCommodities | HTML | ✅ OK | fait v20 |
 | Petroineos | HTML | ✅ OK | fait v20 |
 | Orsted | HTML (portail custom) | ✅ corrigé — /vacancies-list/ | fait |
-| SEFE M&T | HTML | ❓ ATS inconnu | bloqué |
+| SEFE M&T | SAP SuccessFactors (probable) | ❓ à confirmer — careers.sefe.eu → 403 proxy | vérifier manuellement |
 
 ---
 
