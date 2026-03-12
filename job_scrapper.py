@@ -234,8 +234,8 @@ SITES = [
     {
         "name": "Uniper",
         "type": "html",
-        "pages": ["https://careers.uniper.energy/en"],
-        "job_pattern": "/job/",  # iCIMS — pattern typique /job/Job-Title/JOBID/
+        "pages": ["https://careers.uniper.energy/en/search/?searchKeyword="],  # iCIMS : homepage = search bar sans résultats, il faut l'URL search vide
+        "job_pattern": "/job/",  # iCIMS — pattern typique /en/job/Job-Title-Location?id=XXXXX
         "wait_for": "a[href*='/job/']",  # SPA iCIMS : attendre injection DOM avant parse
     },
     {
