@@ -663,17 +663,20 @@ def scrape_uniper() -> list[dict]:
         for job in body.get("jobs", []):
             d = job.get("data", {})
             title = (d.get("title") or d.get("jobTitle") or d.get("name") or "").strip()
-            # URL : champ direct ou reconstruction depuis slug+id
+            # objectID est à la racine (Algolia standard), pas dans data
+            job_id = str(job.get("objectID") or d.get("id") or d.get("jobId") or "")
+            # URL : champ direct, ou reconstruction slug+id
             url = d.get("url") or d.get("link") or d.get("absoluteUrl") or ""
-            if not url:
-                slug = d.get("slug") or d.get("urlSlug") or ""
-                job_id = d.get("id") or d.get("jobId") or d.get("objectID") or ""
-                if slug and job_id:
-                    url = f"{base}/en/job/{slug}/{job_id}"
+            if not url and job_id:
+                slug = d.get("slug") or d.get("urlSlug") or d.get("externalUrl") or ""
+                if not slug and title:
+                    import re as _re
+                    slug = _re.sub(r"[^a-zA-Z0-9]+", "-", title).strip("-")
+                url = f"{base}/en/job/{slug}/{job_id}" if slug else f"{base}/en/job/{job_id}"
             location = (d.get("location") or d.get("city") or d.get("locationName") or "").strip()
             if isinstance(location, dict):
                 location = location.get("name") or location.get("city") or ""
-            job_id_key = str(d.get("id") or d.get("jobId") or d.get("objectID") or url)
+            job_id_key = job_id or url
             if title and job_id_key not in seen and is_relevant_title(title):
                 seen.add(job_id_key)
                 jobs.append({
