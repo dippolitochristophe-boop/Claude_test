@@ -5,8 +5,8 @@ Usage : python healthcheck.py
 """
 
 import requests
-import json
 import urllib3
+import pathlib
 from bs4 import BeautifulSoup
 
 from job_scrapper import (
@@ -22,12 +22,16 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 TIMEOUT = 15
 results = []
+OUT_FILE = pathlib.Path(__file__).parent / "healthcheck.md"
 
 
-def check(name, ats, count, error=None):
+def check(name, ats, count, error=None, warn=None):
     if error:
         status = "❌"
         detail = error
+    elif warn:
+        status = "⚠️ "
+        detail = warn
     elif count == 0:
         status = "❌"
         detail = "0 jobs"
@@ -99,7 +103,10 @@ for s in SITES:
             links = [a for a in soup.find_all("a", href=True) if pattern in a["href"]]
         else:
             links = soup.find_all("a", href=True)
-        check(s["name"], "HTML", len(links))
+        if len(links) == 0:
+            check(s["name"], "HTML", 0, warn="0 jobs via requests — site JS? vérifier avec Playwright")
+        else:
+            check(s["name"], "HTML", len(links))
     except Exception as e:
         check(s["name"], "HTML", 0, str(e)[:60])
 
@@ -120,16 +127,17 @@ for c in TALEO_SITES:
         check(c["name"], "Taleo", 0, str(e)[:60])
 
 # ── Résumé ─────────────────────────────────────────────────────────────────────
-ok = sum(1 for r in results if r[0] == "✅")
-ko = sum(1 for r in results if r[0] == "❌")
-print(f"\n── Résumé : {ok} OK / {ko} BROKEN / {len(results)} total ──\n")
+ok   = sum(1 for r in results if r[0] == "✅")
+warn = sum(1 for r in results if r[0].startswith("⚠"))
+ko   = sum(1 for r in results if r[0] == "❌")
+print(f"\n── Résumé : {ok} OK / {warn} À VÉRIFIER (JS?) / {ko} BROKEN / {len(results)} total ──\n")
 
 # Écriture markdown
 md_lines = ["# Health Check — S1 configs\n", "| Statut | Entreprise | ATS | Détail |", "|--------|-----------|-----|--------|"]
 for status, name, ats, detail in results:
     md_lines.append(f"| {status} | {name} | {ats} | {detail} |")
-md_lines.append(f"\n**{ok} OK / {ko} BROKEN / {len(results)} total**")
+md_lines.append(f"\n**{ok} OK / {warn} À VÉRIFIER / {ko} BROKEN / {len(results)} total**")
+md_lines.append("\n> ⚠️  = site retourne 0 jobs via requests seul — nécessite Playwright pour confirmer")
 
-with open("/tmp/healthcheck.md", "w") as f:
-    f.write("\n".join(md_lines))
-print("Résultats écrits dans /tmp/healthcheck.md")
+OUT_FILE.write_text("\n".join(md_lines), encoding="utf-8")
+print(f"Résultats écrits dans {OUT_FILE}")
