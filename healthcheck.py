@@ -9,6 +9,12 @@ import urllib3
 import pathlib
 from bs4 import BeautifulSoup
 
+try:
+    from playwright.sync_api import sync_playwright
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+
 from job_scrapper import (
     SITES,
     WORKDAY_COMPANIES,
@@ -25,13 +31,10 @@ results = []
 OUT_FILE = pathlib.Path(__file__).parent / "healthcheck.md"
 
 
-def check(name, ats, count, error=None, warn=None):
+def check(name, ats, count, error=None):
     if error:
         status = "❌"
         detail = error
-    elif warn:
-        status = "⚠️ "
-        detail = warn
     elif count == 0:
         status = "❌"
         detail = "0 jobs"
@@ -40,6 +43,13 @@ def check(name, ats, count, error=None, warn=None):
         detail = f"{count} jobs"
     results.append((status, name, ats, detail))
     print(f"{status}  {name:<35} {ats:<16} {detail}")
+
+
+def count_links(html: str, pattern: str) -> int:
+    soup = BeautifulSoup(html, "html.parser")
+    if pattern and pattern != "*":
+        return len([a for a in soup.find_all("a", href=True) if pattern in a["href"]])
+    return len(soup.find_all("a", href=True))
 
 
 # ── Workday ────────────────────────────────────────────────────────────────────
@@ -89,26 +99,48 @@ for c in GREENHOUSE_COMPANIES:
         check(c["name"], "Greenhouse", 0, str(e)[:60])
 
 # ── HTML (SITES) ───────────────────────────────────────────────────────────────
-print("\n── HTML ──")
-for s in SITES:
+print(f"\n── HTML {'(Playwright)' if PLAYWRIGHT_AVAILABLE else '(requests only — install Playwright for full check)'} ──")
+
+def _check_html_site(s, pw_page=None):
     url = s["pages"][0]
     pattern = s.get("job_pattern", "")
     try:
+        # Playwright : networkidle puis scroll pour JS lazy-loading
+        if pw_page is not None:
+            try:
+                try:
+                    pw_page.goto(url, wait_until="networkidle", timeout=30000)
+                except Exception:
+                    pw_page.goto(url, wait_until="load", timeout=30000)
+                for _ in range(3):
+                    pw_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    pw_page.wait_for_timeout(700)
+                pw_page.wait_for_timeout(1000)
+                n = count_links(pw_page.content(), pattern)
+                check(s["name"], "HTML/PW", n)
+                return
+            except Exception as e:
+                print(f"     ↳ Playwright fail → requests ({str(e)[:60]})")
+        # Fallback requests
         r = requests.get(url, headers=HEADERS, timeout=TIMEOUT, verify=False)
         if r.status_code != 200:
             check(s["name"], "HTML", 0, f"HTTP {r.status_code}")
-            continue
-        soup = BeautifulSoup(r.text, "html.parser")
-        if pattern and pattern != "*":
-            links = [a for a in soup.find_all("a", href=True) if pattern in a["href"]]
-        else:
-            links = soup.find_all("a", href=True)
-        if len(links) == 0:
-            check(s["name"], "HTML", 0, warn="0 jobs via requests — site JS? vérifier avec Playwright")
-        else:
-            check(s["name"], "HTML", len(links))
+            return
+        check(s["name"], "HTML", count_links(r.text, pattern))
     except Exception as e:
         check(s["name"], "HTML", 0, str(e)[:60])
+
+if PLAYWRIGHT_AVAILABLE:
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.set_extra_http_headers(HEADERS)
+        for s in SITES:
+            _check_html_site(s, pw_page=page)
+        browser.close()
+else:
+    for s in SITES:
+        _check_html_site(s)
 
 # ── Taleo ──────────────────────────────────────────────────────────────────────
 print("\n── Taleo ──")
@@ -127,17 +159,15 @@ for c in TALEO_SITES:
         check(c["name"], "Taleo", 0, str(e)[:60])
 
 # ── Résumé ─────────────────────────────────────────────────────────────────────
-ok   = sum(1 for r in results if r[0] == "✅")
-warn = sum(1 for r in results if r[0].startswith("⚠"))
-ko   = sum(1 for r in results if r[0] == "❌")
-print(f"\n── Résumé : {ok} OK / {warn} À VÉRIFIER (JS?) / {ko} BROKEN / {len(results)} total ──\n")
+ok = sum(1 for r in results if r[0] == "✅")
+ko = sum(1 for r in results if r[0] == "❌")
+print(f"\n── Résumé : {ok} OK / {ko} BROKEN / {len(results)} total ──\n")
 
 # Écriture markdown
 md_lines = ["# Health Check — S1 configs\n", "| Statut | Entreprise | ATS | Détail |", "|--------|-----------|-----|--------|"]
 for status, name, ats, detail in results:
     md_lines.append(f"| {status} | {name} | {ats} | {detail} |")
-md_lines.append(f"\n**{ok} OK / {warn} À VÉRIFIER / {ko} BROKEN / {len(results)} total**")
-md_lines.append("\n> ⚠️  = site retourne 0 jobs via requests seul — nécessite Playwright pour confirmer")
+md_lines.append(f"\n**{ok} OK / {ko} BROKEN / {len(results)} total**")
 
 OUT_FILE.write_text("\n".join(md_lines), encoding="utf-8")
 print(f"Résultats écrits dans {OUT_FILE}")
