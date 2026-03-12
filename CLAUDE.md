@@ -34,7 +34,7 @@
 | RWE | HTML | ✅ OK | — |
 | Uniper | HTML | ✅ OK | — |
 | ENGIE | HTML (Phenom) | 🔧 URLs search ajoutées | à tester |
-| Glencore | Workday | ✅ corrigé — tenant glencore/External/wd3 | fait |
+| Glencore | Greenhouse EU | ✅ corrigé — glencoreuk + tlgglencorebaar | fait v21 |
 | Statkraft | SmartRecruiters | ✅ corrigé — sr_id statkraft1 | fait |
 | InCommodities | HTML | ✅ OK | fait v20 |
 | Petroineos | HTML | ✅ OK | fait v20 |
@@ -123,6 +123,7 @@ N'attends pas la fin — écris au fur et à mesure.
 | `SITES` | HTML direct | Playwright + requests fallback |
 | `WORKDAY_COMPANIES` | Workday API | POST JSON `/wday/cxs/` |
 | `SMARTRECRUITERS_COMPANIES` | SmartRecruiters API | GET `/v1/companies/{sr_id}/postings` |
+| `GREENHOUSE_COMPANIES` | Greenhouse API | GET `/v1/boards/{board_token}/jobs` |
 | `TALEO_SITES` | Taleo HTML | requests + BeautifulSoup |
 
 ### Ajouter une entreprise HTML
@@ -139,6 +140,12 @@ N'attends pas la fin — écris au fur et à mesure.
 ### Ajouter une entreprise SmartRecruiters
 ```python
 {"name": "Company", "sr_id": "CompanyId"}
+```
+
+### Ajouter une entreprise Greenhouse
+```python
+{"name": "Company", "board_token": "companytoken", "region": "eu"}  # region: "eu" ou "us"
+# API : boards-api.{region}.greenhouse.io/v1/boards/{board_token}/jobs
 ```
 
 ## Environnement d'exécution

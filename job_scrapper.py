@@ -245,7 +245,7 @@ SITES = [
         "job_pattern": "/job/",
     },
     # ── Commodity traders / bourses d'énergie ─────────────────────────────────
-    # Glencore → déplacé dans WORKDAY_COMPANIES (tenant: glencore, site: External, wd3)
+    # Glencore → déplacé dans GREENHOUSE_COMPANIES (Greenhouse EU : glencoreuk + tlgglencorebaar)
     {
         "name": "EEX Group",
         "type": "html",
@@ -296,7 +296,7 @@ WORKDAY_COMPANIES = [
     {"name": "BP",        "tenant": "bpinternational","site": "bpCareers",           "wd": "wd3"},  # ✅ confirmé (corrigé v15)
     {"name": "Equinor",   "tenant": "equinor",       "site": "EQNR",                "wd": "wd3"},  # ✅ confirmé
     # Orsted → déplacé dans SITES (portail HTML custom orsted.com/en/careers/vacancies-list)
-    {"name": "Glencore",  "tenant": "glencore",      "site": "External",            "wd": "wd3"},  # ✅ confirmé glencore.wd3.myworkdayjobs.com/External
+    # Glencore → déplacé dans GREENHOUSE_COMPANIES (portail Greenhouse EU, pas Workday)
     {"name": "EDF Trading","tenant": "edftrading",   "site": "EDFTrading",          "wd": "wd1"},  # ✅ confirmé (corrigé v15)
     {"name": "Centrica",  "tenant": "centrica",      "site": "Centrica",            "wd": "wd3"},  # ✅ confirmé
     {"name": "Castleton Commodities (CCI)", "tenant": "osv-cci", "site": "CCICareers", "wd": "wd1"},  # ✅ confirmé
@@ -309,6 +309,13 @@ SMARTRECRUITERS_COMPANIES = [
     # RWE   → déplacé dans SITES (portail HTML propre, pas SmartRecruiters)
     # Uniper → déplacé dans SITES (portail iCIMS careers.uniper.energy)
     # ENGIE  → dans SITES (portail Phenom People jobs.engie.com)
+]
+
+GREENHOUSE_COMPANIES = [
+    # API EU : boards-api.eu.greenhouse.io/v1/boards/{board_token}/jobs
+    # Retourne tous les jobs → filtrage local par is_relevant_title()
+    {"name": "Glencore (London Trading)", "board_token": "glencoreuk",     "region": "eu"},  # ✅ confirmé job-boards.eu.greenhouse.io/glencoreuk
+    {"name": "Glencore (Baar HQ)",        "board_token": "tlgglencorebaar", "region": "eu"},  # ✅ confirmé job-boards.eu.greenhouse.io/tlgglencorebaar
 ]
 
 
@@ -579,6 +586,46 @@ def scrape_smartrecruiters(company: dict) -> list[dict]:
     return jobs
 
 
+# ── Greenhouse API ───────────────────────────────────────────────────────────
+
+def scrape_greenhouse(company: dict) -> list[dict]:
+    """Scraper Greenhouse — GET /v1/boards/{board_token}/jobs (retourne tout, filtre local)."""
+    jobs = []
+    seen = set()
+    board_token = company["board_token"]
+    region = company.get("region", "us")
+    if region == "eu":
+        api_url = f"https://boards-api.eu.greenhouse.io/v1/boards/{board_token}/jobs"
+    else:
+        api_url = f"https://boards-api.greenhouse.io/v1/boards/{board_token}/jobs"
+    try:
+        r = requests.get(api_url, headers=HEADERS, timeout=12, verify=False)
+        if r.status_code == 200:
+            for job in r.json().get("jobs", []):
+                title = job.get("title", "").strip()
+                location = job.get("location", {}).get("name", "")
+                url = job.get("absolute_url", "")
+                job_id = str(job.get("id", ""))
+                if title and job_id not in seen and is_relevant_title(title):
+                    seen.add(job_id)
+                    jobs.append({
+                        "title": title,
+                        "company": company["name"],
+                        "location": location,
+                        "bucket": get_location_bucket(location),
+                        "description": "",
+                        "url": url,
+                        "date": job.get("updated_at", "")[:10] if job.get("updated_at") else "",
+                        "source": "Greenhouse",
+                        "score": 0,
+                    })
+        elif r.status_code == 404:
+            print(f"   ↳ HTTP 404 — board_token '{board_token}' invalide sur Greenhouse")
+    except Exception as e:
+        print(f"   ↳ erreur réseau : {str(e)[:50]}")
+    return jobs
+
+
 # ── Oracle Taleo (TotalEnergies, Macquarie Group) ────────────────────────────
 # Même structure ATS Oracle Taleo : SearchJobs/{query} + JobDetail/{id}
 
@@ -818,13 +865,14 @@ def main():
     args = parse_args()
 
     # ── Filtre sociétés ───────────────────────────────────────────────────────
-    sites       = filter_companies(SITES,                     args.company)
-    workday_cos = filter_companies(WORKDAY_COMPANIES,         args.company)
-    sr_cos      = filter_companies(SMARTRECRUITERS_COMPANIES, args.company)
-    taleo_cos   = filter_companies(TALEO_SITES,               args.company)
+    sites          = filter_companies(SITES,                     args.company)
+    workday_cos    = filter_companies(WORKDAY_COMPANIES,         args.company)
+    sr_cos         = filter_companies(SMARTRECRUITERS_COMPANIES, args.company)
+    taleo_cos      = filter_companies(TALEO_SITES,               args.company)
+    greenhouse_cos = filter_companies(GREENHOUSE_COMPANIES,      args.company)
 
     if args.company:
-        found = len(sites) + len(workday_cos) + len(sr_cos) + len(taleo_cos)
+        found = len(sites) + len(workday_cos) + len(sr_cos) + len(taleo_cos) + len(greenhouse_cos)
         print(f"🔎 Filtre --company : {', '.join(args.company)} → {found} société(s) retenue(s)")
 
     if PLAYWRIGHT_AVAILABLE:
@@ -883,6 +931,13 @@ def main():
             jobs = scrape_smartrecruiters(co)
             print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
             all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(1)
+
+        print("\n── Greenhouse API ───────────────────────────────────────────")
+        for co in greenhouse_cos:
+            print(f"🏢 {co['name']}...", end=" ", flush=True)
+            jobs = scrape_greenhouse(co)
+            print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
+            all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(0.5)
 
         print("\n── Oracle Taleo (TotalEnergies, Macquarie) ──────────────────")
         for co in taleo_cos:
