@@ -33,7 +33,11 @@ try:
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
 
-import anthropic
+try:
+    import anthropic
+    ANTHROPIC_AVAILABLE = True
+except ImportError:
+    ANTHROPIC_AVAILABLE = False
 
 from job_scrapper import (
     SITES, WORKDAY_COMPANIES, SMARTRECRUITERS_COMPANIES,
@@ -146,15 +150,17 @@ def report(name, ats, config, result):
         status = "❌"
         detail = "0 jobs bruts — scraping cassé"
         # Diagnostic Claude si API key disponible
-        if os.environ.get("ANTHROPIC_API_KEY"):
+        if ANTHROPIC_AVAILABLE and os.environ.get("ANTHROPIC_API_KEY"):
             diag = _claude_diagnose(name, config, log, 0)
             detail += f"\n      🔍 {diag}"
+        elif not ANTHROPIC_AVAILABLE:
+            detail += "\n      (pip install anthropic pour diagnostic automatique)"
         else:
-            detail += " (set ANTHROPIC_API_KEY pour diagnostic automatique)"
+            detail += "\n      (set ANTHROPIC_API_KEY pour diagnostic automatique)"
     elif filtered is not None and filtered == 0:
         status = "⚠️ "
         detail = f"{raw} jobs bruts, 0 pertinents — profil ou filtre à ajuster"
-        if os.environ.get("ANTHROPIC_API_KEY"):
+        if ANTHROPIC_AVAILABLE and os.environ.get("ANTHROPIC_API_KEY"):
             diag = _claude_diagnose(name, config, log, raw)
             detail += f"\n      🔍 {diag}"
     else:
