@@ -108,20 +108,19 @@ Sois direct et technique. Pas de blabla."""
 def _validate_html_site(s: dict, pw_page=None) -> dict:
     """
     Valide un site HTML.
-    Retourne {raw: int, filtered: int, strategy: str, log: str}.
+    Retourne {raw: int, raw_titles: list, filtered: int, strategy: str, log: str}.
     """
     buf = StringIO()
-
-    # Capture le stdout de smart_scrape_site (qui loggue les APIs)
     with redirect_stdout(buf):
         jobs_raw, strategy = smart_scrape_site(s, pw_page, validate_mode=True)
         jobs_filtered, _   = smart_scrape_site(s, pw_page, validate_mode=False)
 
     return {
-        "raw":      len(jobs_raw),
-        "filtered": len(jobs_filtered),
-        "strategy": strategy,
-        "log":      buf.getvalue(),
+        "raw":        len(jobs_raw),
+        "raw_titles": [j["title"] for j in jobs_raw],
+        "filtered":   len(jobs_filtered),
+        "strategy":   strategy,
+        "log":        buf.getvalue(),
     }
 
 
@@ -160,6 +159,12 @@ def report(name, ats, config, result):
     elif filtered is not None and filtered == 0:
         status = "⚠️ "
         detail = f"{raw} jobs bruts, 0 pertinents — profil ou filtre à ajuster"
+        raw_titles = result.get("raw_titles", [])
+        if raw_titles:
+            for t in raw_titles[:5]:
+                detail += f"\n      • {t}"
+            if len(raw_titles) > 5:
+                detail += f"\n      … +{len(raw_titles) - 5} autres"
         if ANTHROPIC_AVAILABLE and os.environ.get("ANTHROPIC_API_KEY"):
             diag = _claude_diagnose(name, config, log, raw)
             detail += f"\n      🔍 {diag}"
