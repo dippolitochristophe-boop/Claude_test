@@ -326,8 +326,11 @@ GREENHOUSE_COMPANIES = [
 
 # ── Parser HTML commun ────────────────────────────────────────────────────────
 
-def parse_jobs_from_html(html: str, site: dict) -> list[dict]:
-    """Parse le HTML (qu'il vienne de Playwright ou requests) — logique identique."""
+def parse_jobs_from_html(html: str, site: dict, validate_mode: bool = False) -> list[dict]:
+    """
+    Parse le HTML (qu'il vienne de Playwright ou requests) — logique identique.
+    validate_mode=True : désactive is_relevant_title (health-check / Agent 3).
+    """
     soup = BeautifulSoup(html, "html.parser")
     jobs = []
     seen = set()
@@ -345,13 +348,15 @@ def parse_jobs_from_html(html: str, site: dict) -> list[dict]:
 
         # Titre : lien lui-même, sinon heading dans le parent
         text = a.get_text(strip=True)
-        if not is_relevant_title(text):
+        if not validate_mode and not is_relevant_title(text):
             parent = a.find_parent(["li", "article", "div", "section"])
             if parent:
                 heading = parent.find(["h2", "h3", "h4"])
                 text = heading.get_text(strip=True) if heading else parent.get_text(separator=" ", strip=True)[:100]
 
-        if not is_relevant_title(text):
+        if not text:
+            continue
+        if not validate_mode and not is_relevant_title(text):
             continue
 
         # Localisation : cherche dans le parent, préfère la chaîne la plus courte

@@ -75,13 +75,39 @@ JOB_LINK_PATTERNS = [
 ]
 
 # ── Clés typiques dans les réponses JSON d'ATS ────────────────────────────────
+# Couvre : Workday, SmartRecruiters, Greenhouse, Lever, Taleo, SAP SF,
+#          Phenom People, iCIMS, Algolia, portails custom
 
-JOB_LIST_KEYS   = ["jobs", "postings", "items", "results", "content", "data",
-                   "jobPostings", "vacancies", "positions", "offers", "hits"]
-JOB_TITLE_KEYS  = ["title", "jobTitle", "name", "position", "label", "headline"]
-JOB_URL_KEYS    = ["url", "link", "absoluteUrl", "absolute_url", "externalPath",
-                   "applyUrl", "jobUrl", "detailUrl", "slug"]
-JOB_LOC_KEYS    = ["location", "city", "locationName", "locationsText", "place"]
+JOB_LIST_KEYS   = [
+    # Standards
+    "jobs", "postings", "items", "results", "content", "data",
+    "jobPostings", "vacancies", "positions", "offers", "hits",
+    # ATS spécifiques
+    "jobList", "jobOffers", "openPositions", "requisitions",
+    "opportunities", "listings", "records", "rows", "nodes",
+    "edges", "collection", "list", "elements", "documents",
+    # Phenom People / SAP SF
+    "requisitionList", "jobRequisitions", "postingList",
+    # iCIMS
+    "openings", "jobs_list",
+]
+JOB_TITLE_KEYS  = [
+    "title", "jobTitle", "name", "position", "label", "headline",
+    # ATS spécifiques
+    "jobName", "positionTitle", "requisitionTitle", "displayTitle",
+    "jobTitleName", "roleName", "opportunityTitle", "job_title",
+    "posting_title", "externalJobTitle",
+]
+JOB_URL_KEYS    = [
+    "url", "link", "absoluteUrl", "absolute_url", "externalPath",
+    "applyUrl", "jobUrl", "detailUrl", "slug", "path",
+    "job_url", "apply_url", "hostedUrl", "canonicalUrl",
+]
+JOB_LOC_KEYS    = [
+    "location", "city", "locationName", "locationsText", "place",
+    "primaryLocation", "jobLocation", "officeLocation", "workLocation",
+    "locationText", "locations",
+]
 
 
 def _dismiss_cookie_consent(page) -> str:
@@ -177,9 +203,53 @@ def _extract_location(d: dict) -> str:
     return ""
 
 
-def _parse_api_jobs(body: dict | list, company_name: str) -> list[dict]:
+def _find_job_list_in_body(body, max_depth: int = 3) -> list | None:
+    """
+    Cherche récursivement une liste de dicts ressemblant à des jobs.
+    Priorité aux clés connues, puis exploration en profondeur.
+    """
+    if isinstance(body, list):
+        if body and isinstance(body[0], dict):
+            return body
+        return None
+    if not isinstance(body, dict) or max_depth == 0:
+        return None
+    # 1. Clés connues en priorité
+    for k in JOB_LIST_KEYS:
+        v = body.get(k)
+        if isinstance(v, list) and v and isinstance(v[0], dict):
+            return v
+    # 2. Exploration récursive des valeurs dict/list
+    for v in body.values():
+        if isinstance(v, (dict, list)):
+            result = _find_job_list_in_body(v, max_depth - 1)
+            if result and len(result) >= 1:
+                return result
+    return None
+
+
+def _log_unrecognized_api(api_url: str, body) -> None:
+    """Loggue la structure d'une API non reconnue — aide au diagnostic et à l'extension des clés."""
+    short = api_url.split("?")[0][-70:]
+    if isinstance(body, list):
+        sample = body[0] if body else {}
+        keys = list(sample.keys())[:10] if isinstance(sample, dict) else [type(sample).__name__]
+        print(f"       • LIST[{len(body)}] {short}")
+        print(f"         item_keys={keys}")
+    elif isinstance(body, dict):
+        top = list(body.keys())[:10]
+        lists = {k: len(v) for k, v in body.items() if isinstance(v, list) and v}
+        nested = {k: list(v.keys())[:6] for k, v in body.items() if isinstance(v, dict)}
+        print(f"       • DICT {short}")
+        print(f"         top_keys={top}  lists={lists}")
+        if nested:
+            print(f"         nested={nested}")
+
+
+def _parse_api_jobs(body, company_name: str, validate_mode: bool = False) -> list[dict]:
     """
     Auto-détecte la structure d'une réponse API et extrait les jobs.
+    validate_mode=True : désactive le filtre is_relevant_title (health-check, Agent 3).
     Retourne une liste de dicts jobs (sans score, bucket sera calculé par l'appelant).
     """
     from job_scrapper import is_relevant_title, get_location_bucket
@@ -187,19 +257,7 @@ def _parse_api_jobs(body: dict | list, company_name: str) -> list[dict]:
     jobs = []
     seen = set()
 
-    # Trouve la liste de jobs dans le body
-    job_list = None
-    if isinstance(body, list):
-        job_list = body
-    elif isinstance(body, dict):
-        for k in JOB_LIST_KEYS:
-            v = body.get(k)
-            if isinstance(v, list) and v:
-                job_list = v
-                break
-        # Cas Algolia : body["hits"]
-        if job_list is None and "hits" in body:
-            job_list = body.get("hits", [])
+    job_list = _find_job_list_in_body(body)
 
     if not job_list:
         return []
@@ -219,7 +277,7 @@ def _parse_api_jobs(body: dict | list, company_name: str) -> list[dict]:
                 title = v.strip()
                 break
 
-        if not title or not is_relevant_title(title):
+        if not title or (not validate_mode and not is_relevant_title(title)):
             continue
 
         # URL
@@ -261,7 +319,8 @@ def _parse_api_jobs(body: dict | list, company_name: str) -> list[dict]:
     return jobs
 
 
-def smart_scrape_site(site: dict, pw_page, headers: dict = None) -> tuple[list[dict], str]:
+def smart_scrape_site(site: dict, pw_page, headers: dict = None,
+                      validate_mode: bool = False) -> tuple[list[dict], str]:
     """
     Scrape un site avec toutes les stratégies disponibles.
 
@@ -272,11 +331,12 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None) -> tuple[list[d
       1. Playwright + DOM (avec cookie consent + wait)
       2. Playwright + API intercept (si DOM = 0)
       3. requests fallback (si Playwright pas dispo ou erreur réseau)
+
+    validate_mode=True : désactive is_relevant_title (health-check / Agent 3).
     """
     from job_scrapper import parse_jobs_from_html, is_relevant_title, get_location_bucket
 
     if pw_page is None:
-        # Pas de browser → fallback requests direct
         jobs = _requests_fallback(site, headers)
         return jobs, "requests-fallback (no browser)"
 
@@ -314,7 +374,7 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None) -> tuple[list[d
             nav_strategy = _navigate(pw_page, page_url)
             if nav_strategy == "error":
                 pw_page.remove_listener("response", on_response)
-                jobs = _requests_fallback_url(page_url, site, headers)
+                jobs = _requests_fallback_url(page_url, site, headers, validate_mode=validate_mode)
                 for j in jobs:
                     dedup = j["url"].split("?")[0].rstrip("/")
                     if dedup not in seen_urls:
@@ -334,7 +394,7 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None) -> tuple[list[d
             found_sel = _wait_for_jobs_dom(pw_page, site.get("wait_for"))
 
             # ── Étape 5 : parse DOM ───────────────────────────────────────────
-            dom_jobs = parse_jobs_from_html(pw_page.content(), site)
+            dom_jobs = parse_jobs_from_html(pw_page.content(), site, validate_mode=validate_mode)
             for j in dom_jobs:
                 j["source"] = "Playwright"
 
@@ -351,9 +411,8 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None) -> tuple[list[d
             # ── Étape 6 : DOM vide → analyse APIs interceptées ────────────────
             api_jobs = []
             for api_url, body in intercepted_apis:
-                candidate_jobs = _parse_api_jobs(body, company)
+                candidate_jobs = _parse_api_jobs(body, company, validate_mode=validate_mode)
                 for j in candidate_jobs:
-                    # Compléter les URLs relatives
                     if j["url"].startswith("/"):
                         j["url"] = base + j["url"]
                     api_jobs.append(j)
@@ -369,8 +428,14 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None) -> tuple[list[d
                 continue
 
             # ── Étape 7 : dernier recours requests ───────────────────────────
-            print(f"     ↳ DOM=0, APIs interceptées={len(intercepted_apis)} sans jobs reconnus → requests fallback")
-            jobs = _requests_fallback_url(page_url, site, headers)
+            # Debug : loggue les structures d'APIs non reconnues pour diagnostic
+            if intercepted_apis:
+                print(f"     ↳ DOM=0, {len(intercepted_apis)} API(s) interceptée(s) — structures non reconnues :")
+                for api_url, body in intercepted_apis:
+                    _log_unrecognized_api(api_url, body)
+            else:
+                print(f"     ↳ DOM=0, aucune API JSON interceptée → requests fallback")
+            jobs = _requests_fallback_url(page_url, site, headers, validate_mode=validate_mode)
             for j in jobs:
                 dedup = j["url"].split("?")[0].rstrip("/")
                 if dedup not in seen_urls:
@@ -391,15 +456,16 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None) -> tuple[list[d
     return all_jobs, strategy
 
 
-def _requests_fallback(site: dict, headers: dict = None) -> list[dict]:
+def _requests_fallback(site: dict, headers: dict = None, validate_mode: bool = False) -> list[dict]:
     jobs = []
     for url in site["pages"]:
-        jobs.extend(_requests_fallback_url(url, site, headers))
+        jobs.extend(_requests_fallback_url(url, site, headers, validate_mode=validate_mode))
         time.sleep(0.5)
     return jobs
 
 
-def _requests_fallback_url(url: str, site: dict, headers: dict = None) -> list[dict]:
+def _requests_fallback_url(url: str, site: dict, headers: dict = None,
+                            validate_mode: bool = False) -> list[dict]:
     from job_scrapper import parse_jobs_from_html
     _h = headers or {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -408,7 +474,7 @@ def _requests_fallback_url(url: str, site: dict, headers: dict = None) -> list[d
     try:
         r = requests.get(url, headers=_h, timeout=15, verify=False)
         if r.status_code == 200:
-            jobs = parse_jobs_from_html(r.text, site)
+            jobs = parse_jobs_from_html(r.text, site, validate_mode=validate_mode)
             for j in jobs:
                 j["source"] = "requests"
             return jobs
