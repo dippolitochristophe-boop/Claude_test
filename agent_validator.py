@@ -83,11 +83,12 @@ def _claude_diagnose(company: str, config: dict, scrape_log: str, jobs_raw_count
 Config: {config}
 Log: {log_trimmed}
 
-2 sentences: most likely cause + concrete fix (URL/tenant/site/job_pattern/cookie/API key)."""
+Answer in exactly 2 short plain-text sentences (no markdown, no headers, no bullet points):
+sentence 1 = most likely cause, sentence 2 = concrete fix."""
 
     msg = client.messages.create(
         model=MODEL,
-        max_tokens=150,
+        max_tokens=180,
         messages=[{"role": "user", "content": prompt}],
     )
     return msg.content[0].text.strip()

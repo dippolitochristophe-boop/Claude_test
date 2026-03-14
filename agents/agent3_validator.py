@@ -223,21 +223,16 @@ def _diagnose(name: str, config: dict, error: str) -> str:
 
     client = anthropic.Anthropic()
     prompt = f"""\
-ATS scraping config FAILED for **{name}**.
+ATS scraping config FAILED for {name}.
 Config: {json.dumps(config)}
 Error: {error}
 
-In 2 sentences max: most likely cause + concrete fix.
-ATS specifics:
-- Workday: check tenant/site name/wd number (wd1 vs wd3)
-- SmartRecruiters: check sr_id case sensitivity
-- Greenhouse: check board_token and region (eu vs us)
-- HTML: check listing URL + job_pattern substring
-Be direct and technical.\
+Answer in exactly 2 short plain-text sentences (no markdown, no headers):
+sentence 1 = most likely cause (tenant/site/wd/sr_id/board_token/region), sentence 2 = concrete fix.\
 """
     msg = client.messages.create(
         model=MODEL,
-        max_tokens=150,
+        max_tokens=180,
         messages=[{"role": "user", "content": prompt}],
     )
     return msg.content[0].text.strip()
