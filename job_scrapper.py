@@ -15,7 +15,12 @@ ARCHITECTURE :
 
 import argparse
 import os
+import sys
 import requests
+
+# Fix Unicode output on Windows (cp1252 → utf-8)
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
 import json
 import time
 from datetime import datetime
