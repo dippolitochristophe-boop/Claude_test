@@ -25,7 +25,7 @@ import urllib3
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-from job_scrapper import HEADERS, is_relevant_title
+from job_scrapper import HEADERS, is_relevant_title, configure as configure_scraper
 
 try:
     import anthropic
@@ -39,13 +39,18 @@ MODEL = "claude-haiku-4-5-20251001"
 
 # ── Fonction principale ────────────────────────────────────────────────────────
 
-def validate(agent2_result: dict, progress_cb=None) -> dict:
+def validate(agent2_result: dict, profile: dict = None, progress_cb=None) -> dict:
     """
     Valide une config issue d'Agent 2.
 
     Input  : dict {name, ats_type, config, confidence, notes}
+             profile : profil utilisateur pour le filtre de pertinence (optionnel)
     Output : dict {name, status, raw_count, filtered_count, sample_job, diagnosis}
     """
+    # Configurer le scraper avec le profil pour que is_relevant_title() soit correct
+    if profile:
+        configure_scraper(profile)
+
     name     = agent2_result.get("name", "Unknown")
     ats_type = agent2_result.get("ats_type", "unknown")
     config   = agent2_result.get("config", {})

@@ -28,6 +28,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from agents.agent1_discovery import run_discovery
 from agents.agent2_config import generate_config
 from agents.agent3_validator import validate
+from profiles import load_profile, save_profile
 
 
 # ── Orchestrateur principal ────────────────────────────────────────────────────
@@ -69,12 +70,12 @@ def run_pipeline(profile: dict, progress_cb=None) -> dict:
 
         if len(batch) == 1:
             # Pas de parallélisme pour les batches d'une seule entreprise
-            results = [_process_company(batch[0], log)]
+            results = [_process_company(batch[0], profile, log)]
         else:
             # 2 en parallèle
             with ThreadPoolExecutor(max_workers=2) as executor:
                 futures = {
-                    executor.submit(_process_company, company, log): company
+                    executor.submit(_process_company, company, profile, log): company
                     for company in batch
                 }
                 results = []
@@ -126,7 +127,7 @@ def run_pipeline(profile: dict, progress_cb=None) -> dict:
     return output
 
 
-def _process_company(company: dict, log) -> dict:
+def _process_company(company: dict, profile: dict, log) -> dict:
     """
     Traite une seule entreprise : Agent 2 (config) + Agent 3 (validation).
     Retourne un dict de résultat normalisé.
@@ -150,8 +151,8 @@ def _process_company(company: dict, log) -> dict:
             "diagnosis": agent2_result.get("notes", "invalid config"),
         }
 
-    # Agent 3 — Validator
-    agent3_result = validate(agent2_result, progress_cb=log)
+    # Agent 3 — Validator (avec profil pour le filtre de pertinence)
+    agent3_result = validate(agent2_result, profile=profile, progress_cb=log)
 
     return {
         "name": name,
@@ -235,17 +236,11 @@ if __name__ == "__main__":
 
     else:
         # Pipeline complet
-        if args.profile_file and os.path.exists(args.profile_file):
-            with open(args.profile_file) as f:
-                profile = json.load(f)
+        if args.profile_file:
+            profile = load_profile(args.profile_file)
         else:
-            # Profil de test par défaut
-            profile = {
-                "role_description": "energy/power trader, 5 years experience, European markets",
-                "sectors": ["energy trading", "power", "renewables", "gas"],
-                "locations": ["London", "Geneva", "Amsterdam", "Paris"],
-                "max_companies": 10,  # Petit pour le test initial
-            }
+            # Charge profile.json (cwd) ou retourne le DEFAULT_PROFILE
+            profile = load_profile()
 
         result = run_pipeline(profile)
         print(f"\nValidated configs: {len(result['validated_configs'])}")

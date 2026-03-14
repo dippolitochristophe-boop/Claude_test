@@ -27,6 +27,21 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 SEEN_FILE = ".jobs_seen.json"
 
+# ── Profil actif ──────────────────────────────────────────────────────────────
+# Chargé au démarrage via configure() ou main().
+# Vide = comportement legacy S1 (hardcoded energy/trading).
+ACTIVE_PROFILE: dict = {}
+
+
+def configure(profile: dict) -> None:
+    """
+    Configure le scraper pour un profil utilisateur.
+    Doit être appelé avant tout scraping pour que les filtres soient actifs.
+    Appelé automatiquement par main() depuis profile.json.
+    """
+    global ACTIVE_PROFILE
+    ACTIVE_PROFILE = profile
+
 try:
     from playwright.sync_api import sync_playwright
     from playwright_strategies import smart_scrape_site
@@ -101,6 +116,41 @@ NON_REGRESSION = [
 ]
 
 
+def _get_search_queries() -> list:
+    """
+    Retourne les requêtes à envoyer aux APIs (Workday, SmartRecruiters, Taleo).
+    Si un profil est configuré : utilise ses keywords_include.
+    Sinon : retourne SEARCH_QUERIES hardcodés (comportement S1 legacy).
+    """
+    if ACTIVE_PROFILE.get("keywords_include"):
+        return ACTIVE_PROFILE["keywords_include"]
+    return SEARCH_QUERIES
+
+
+def get_sites(profile: dict = None) -> list:
+    """
+    Retourne la liste SITES avec les pages des sites search-based
+    générées dynamiquement depuis le profil actif.
+    Appelé par main() pour passer les bons sites aux scrapers.
+    """
+    p = profile or ACTIVE_PROFILE
+    keywords = p.get("keywords_include", [])
+    if not keywords:
+        return SITES
+
+    result = []
+    for site in SITES:
+        if "search_base" in site:
+            # Générer les pages à partir des keywords du profil (max 6)
+            pages = [
+                site["search_base"] + kw.replace(" ", "+")
+                for kw in keywords[:6]
+            ]
+            site = {**site, "pages": pages}
+        result.append(site)
+    return result
+
+
 def is_relevant_title(text: str) -> bool:
     t = text.strip()
     if len(t) < 6 or len(t) > 120:
@@ -108,6 +158,16 @@ def is_relevant_title(text: str) -> bool:
     tl = t.lower()
     if any(n in tl for n in TITLE_NOISE):
         return False
+
+    # ── Mode profil (générique) ───────────────────────────────────────────────
+    if ACTIVE_PROFILE.get("keywords_include"):
+        exclude = ACTIVE_PROFILE.get("keywords_exclude", [])
+        include = ACTIVE_PROFILE["keywords_include"]
+        if any(ex in tl for ex in exclude):
+            return False
+        return any(kw in tl for kw in include)
+
+    # ── Mode legacy S1 (fallback si pas de profil configuré) ─────────────────
     if any(ex in tl for ex in DOMAIN_EXCLUDE):
         return False
     if any(kw in tl for kw in DIRECT_MATCH):
@@ -238,6 +298,8 @@ SITES = [
         "type": "html",
         # Phenom People platform — homepage ne liste pas les jobs, utiliser search URLs
         # Pattern confirmé : jobs.engie.com/job/{title}/{id}-en_US/
+        # search_base → pages générées dynamiquement depuis profile["keywords_include"]
+        "search_base": "https://jobs.engie.com/search/?q=",
         "pages": [
             "https://jobs.engie.com/search/?q=power+trader",
             "https://jobs.engie.com/search/?q=energy+trader",
@@ -442,7 +504,7 @@ def scrape_workday(company: dict) -> list[dict]:
     any_200 = False  # au moins une requête réussie → endpoint valide
     base_url = f"https://{company['tenant']}.{company['wd']}.myworkdayjobs.com"
     api_url = f"{base_url}/wday/cxs/{company['tenant']}/{company['site']}/jobs"
-    for query in SEARCH_QUERIES:
+    for query in _get_search_queries():
         try:
             r = requests.post(api_url,
                 json={"limit": 20, "offset": 0, "searchText": query},
@@ -523,7 +585,7 @@ def scrape_smartrecruiters(company: dict) -> list[dict]:
     jobs = []
     seen = set()
     endpoint_ok = None  # None=inconnu, True=OK, False=invalide
-    for q in SEARCH_QUERIES:
+    for q in _get_search_queries():
         try:
             r = requests.get(
                 f"https://api.smartrecruiters.com/v1/companies/{company['sr_id']}/postings",
@@ -711,7 +773,7 @@ def scrape_taleo(company: dict) -> list[dict]:
     base = company["base"]
     jobs = []
     seen = set()
-    for q in TALEO_QUERIES:
+    for q in _get_search_queries():
         url = f"{base}/en_US/careers/SearchJobs/{q.replace(' ', '%20')}?listFilterMode=1&jobRecordsPerPage=20"
         try:
             r = requests.get(url, headers=HEADERS, timeout=15, verify=False)
@@ -752,18 +814,28 @@ def scrape_taleo(company: dict) -> list[dict]:
 
 def score_job(job: dict) -> int:
     text = (job["title"] + " " + job.get("description", "")).lower()
-    tier1 = ["power trader", "energy trader", "front office", "head of trading",
-             "chief risk", "coo", "cro", "portfolio manager", "origination",
-             "market risk", "risk officer", "intraday", "algo trading", "ppa"]
-    tier2 = ["trader", "trading", "risk", "power", "renewable", "bess",
-             "hydro", "commodit", "structuring", "optimizer", "energy", "gas"]
-    tier3 = ["senior", "head", "director", "vp", "managing director", "lead", "svp"]
     score = 0
-    for kw in tier1:
-        if kw in text: score += 4
-    for kw in tier2:
-        if kw in text: score += 2
-    for kw in tier3:
+
+    if ACTIVE_PROFILE.get("keywords_include"):
+        # ── Mode profil (générique) ───────────────────────────────────────────
+        for kw in ACTIVE_PROFILE["keywords_include"]:
+            if kw in text:
+                # Phrase exacte (plusieurs mots) = hit fort
+                score += 4 if " " in kw else 2
+    else:
+        # ── Mode legacy S1 ────────────────────────────────────────────────────
+        tier1 = ["power trader", "energy trader", "front office", "head of trading",
+                 "chief risk", "coo", "cro", "portfolio manager", "origination",
+                 "market risk", "risk officer", "intraday", "algo trading", "ppa"]
+        tier2 = ["trader", "trading", "risk", "power", "renewable", "bess",
+                 "hydro", "commodit", "structuring", "optimizer", "energy", "gas"]
+        for kw in tier1:
+            if kw in text: score += 4
+        for kw in tier2:
+            if kw in text: score += 2
+
+    # Boost séniorité universel
+    for kw in ["senior", "head", "director", "vp", "managing director", "lead", "svp", "chief"]:
         if kw in text: score += 1
     return score
 
@@ -884,7 +956,7 @@ def generate_html_report(jobs: list, new_urls: set = None) -> str:
 </head>
 <body>
   <div class="header">
-    <h1>🔍 Job Scraper v20 — Christophe D'Ippolito</h1>
+    <h1>🔍 Job Scraper v20 — {profile_display_name(ACTIVE_PROFILE) if ACTIVE_PROFILE else "Job Scraper"}</h1>
     <p>{len(jobs)} offres{new_count_str} · {date_str}</p>
   </div>
   {buckets_html}
@@ -901,8 +973,13 @@ def generate_html_report(jobs: list, new_urls: set = None) -> str:
 def main():
     args = parse_args()
 
+    # ── Chargement du profil ──────────────────────────────────────────────────
+    from profiles import load_profile, profile_display_name
+    profile = load_profile()
+    configure(profile)
+
     # ── Filtre sociétés ───────────────────────────────────────────────────────
-    sites          = filter_companies(SITES,                     args.company)
+    sites          = filter_companies(get_sites(profile),        args.company)
     workday_cos    = filter_companies(WORKDAY_COMPANIES,         args.company)
     sr_cos         = filter_companies(SMARTRECRUITERS_COMPANIES, args.company)
     taleo_cos      = filter_companies(TALEO_SITES,               args.company)
@@ -919,7 +996,7 @@ def main():
         mode = "🚨 requests ONLY — RESULTATS INCOMPLETS (pip install playwright)"
     print("=" * 65)
     print(f"🔍 JOB SCRAPER v20 — {mode}")
-    print(f"   Profil : Christophe D'Ippolito | Power focus")
+    print(f"   Profil : {profile_display_name(profile)}")
     print(f"   Date   : {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print("=" * 65)
 
