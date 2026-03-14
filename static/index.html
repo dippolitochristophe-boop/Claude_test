@@ -415,14 +415,17 @@
 <script>
 // ── Locations disponibles ─────────────────────────────────────────────────────
 const ALL_LOCATIONS = [
-  // Countries
-  "United Kingdom", "Switzerland", "Netherlands", "France", "Germany",
-  "Norway", "Sweden", "Denmark", "Belgium", "Austria",
-  "Luxembourg", "Italy", "Spain", "Poland", "Finland",
-  // Broader regions
-  "Middle East", "Asia Pacific", "North America",
-  // Other
-  "Remote / Hybrid",
+  { label: "🌍 Worldwide",          value: "worldwide" },
+  { label: "🇪🇺 EU / Schengen",     value: "eu_schengen" },
+  { label: "🇬🇧 UK & Ireland",      value: "uk_ireland" },
+  { label: "🏔️ DACH",              value: "dach" },
+  { label: "🌊 Nordic",             value: "nordic" },
+  { label: "🇧🇪 Benelux",          value: "benelux" },
+  { label: "🇫🇷 France",           value: "france" },
+  { label: "🌙 Middle East",        value: "middle_east" },
+  { label: "🌏 Asia Pacific",       value: "asia_pacific" },
+  { label: "🗽 North America",      value: "north_america" },
+  { label: "🏠 Remote / Hybrid",    value: "remote" },
 ];
 
 // ── State ─────────────────────────────────────────────────────────────────────
@@ -448,11 +451,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function buildLocationGrid() {
   const grid = document.getElementById('locations-grid');
-  ALL_LOCATIONS.forEach(loc => {
+  ALL_LOCATIONS.forEach(({ label, value }) => {
     const pill = document.createElement('label');
     pill.className = 'loc-pill';
-    pill.dataset.loc = loc;
-    pill.innerHTML = `<input type="checkbox" value="${loc}"> ${loc}`;
+    pill.dataset.loc = value;
+    pill.innerHTML = `<input type="checkbox" value="${value}"> ${label}`;
     pill.querySelector('input').addEventListener('change', () => {
       pill.classList.toggle('checked', pill.querySelector('input').checked);
     });
