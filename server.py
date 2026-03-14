@@ -84,6 +84,7 @@ def _start_run(cmd: list, env_extra: dict = None) -> str:
         stderr=subprocess.STDOUT,
         bufsize=1,
         text=True,
+        encoding="utf-8",
         env=env,
         cwd=os.path.dirname(os.path.abspath(__file__)),
     )
