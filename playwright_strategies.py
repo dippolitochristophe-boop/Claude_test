@@ -19,9 +19,14 @@ Usage :
 """
 
 import re
+import sys
 import time
 import requests
 import urllib3
+
+# Fix Unicode output on Windows (cp1252 → utf-8)
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 

@@ -16,6 +16,10 @@ import os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+# Fix Unicode output on Windows (cp1252 → utf-8)
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
+
 from agents.loop import run_agent
 from agents.tools import SEARCH_ONLY_TOOLS
 

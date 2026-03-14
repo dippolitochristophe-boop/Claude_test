@@ -23,6 +23,10 @@ import requests
 import urllib3
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+
+# Fix Unicode output on Windows (cp1252 → utf-8)
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from job_scrapper import HEADERS, is_relevant_title, configure as configure_scraper

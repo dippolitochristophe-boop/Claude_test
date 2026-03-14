@@ -8,8 +8,13 @@ Usage : python healthcheck.py [--company NomSociété]
 
 import argparse
 import pathlib
+import sys
 import requests
 import urllib3
+
+# Fix Unicode output on Windows (cp1252 → utf-8)
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8")
 
 try:
     from playwright.sync_api import sync_playwright
