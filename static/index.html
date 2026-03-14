@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Job Scraper</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: #f0f2f5;
+      color: #1a1a2e;
+      min-height: 100vh;
+    }
+
+    /* ── Layout ── */
+    .app { display: flex; flex-direction: column; min-height: 100vh; }
+
+    header {
+      background: #1a1a2e;
+      color: white;
+      padding: 16px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { font-size: 1.1em; font-weight: 700; letter-spacing: 0.3px; }
+    header span { color: #94a3b8; font-size: 0.82em; }
+
+    nav {
+      background: white;
+      border-bottom: 1px solid #e5e7eb;
+      display: flex;
+      padding: 0 28px;
+    }
+    nav button {
+      background: none;
+      border: none;
+      border-bottom: 2px solid transparent;
+      padding: 14px 18px;
+      font-size: 0.9em;
+      font-weight: 500;
+      color: #6b7280;
+      cursor: pointer;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    nav button.active { color: #2563eb; border-bottom-color: #2563eb; }
+    nav button:hover:not(.active) { color: #374151; }
+
+    .tab { display: none; padding: 28px; max-width: 820px; }
+    .tab.visible { display: block; }
+
+    /* ── Cards ── */
+    .card {
+      background: white;
+      border-radius: 10px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.07);
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .card h2 { font-size: 0.95em; font-weight: 600; color: #374151; margin-bottom: 16px; }
+
+    /* ── Form fields ── */
+    .field { margin-bottom: 18px; }
+    .field label {
+      display: block;
+      font-size: 0.82em;
+      font-weight: 600;
+      color: #374151;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .field .hint { font-size: 0.78em; color: #9ca3af; margin-top: 4px; font-weight: 400; text-transform: none; letter-spacing: 0; }
+    input[type="text"], textarea {
+      width: 100%;
+      border: 1px solid #d1d5db;
+      border-radius: 7px;
+      padding: 9px 12px;
+      font-size: 0.9em;
+      font-family: inherit;
+      color: #1a1a2e;
+      transition: border-color 0.15s;
+      background: #fafafa;
+    }
+    input[type="text"]:focus, textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+      background: white;
+    }
+    textarea { resize: vertical; min-height: 72px; }
+
+    /* ── Chips ── */
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 8px;
+      border: 1px solid #d1d5db;
+      border-radius: 7px;
+      background: #fafafa;
+      min-height: 44px;
+      cursor: text;
+    }
+    .chips:focus-within { border-color: #2563eb; background: white; }
+    .chip {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      background: #eff6ff;
+      color: #2563eb;
+      border-radius: 20px;
+      padding: 3px 10px 3px 10px;
+      font-size: 0.82em;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .chip.exclude { background: #fef2f2; color: #dc2626; }
+    .chip button {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: inherit;
+      opacity: 0.6;
+      font-size: 1em;
+      padding: 0;
+      line-height: 1;
+    }
+    .chip button:hover { opacity: 1; }
+    .chip-input {
+      border: none;
+      outline: none;
+      background: transparent;
+      font-size: 0.88em;
+      min-width: 140px;
+      padding: 3px 4px;
+      flex: 1;
+    }
+
+    /* ── Location checkboxes ── */
+    .locations-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .loc-pill {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border: 1px solid #d1d5db;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 0.85em;
+      transition: all 0.15s;
+      user-select: none;
+      background: white;
+    }
+    .loc-pill input { display: none; }
+    .loc-pill.checked { background: #eff6ff; border-color: #2563eb; color: #2563eb; font-weight: 500; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      padding: 9px 20px;
+      border: none;
+      border-radius: 7px;
+      font-size: 0.9em;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+    }
+    .btn:hover { opacity: 0.88; }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: #2563eb; color: white; }
+    .btn-secondary { background: #f3f4f6; color: #374151; border: 1px solid #d1d5db; }
+    .btn-green { background: #16a34a; color: white; }
+    .btn-sm { padding: 6px 14px; font-size: 0.82em; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    .save-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 8px;
+    }
+    .save-msg { font-size: 0.82em; color: #16a34a; opacity: 0; transition: opacity 0.4s; }
+    .save-msg.visible { opacity: 1; }
+
+    /* ── Run tab ── */
+    .run-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
+    @media (max-width: 600px) { .run-grid { grid-template-columns: 1fr; } }
+    .run-card {
+      background: white;
+      border-radius: 10px;
+      border: 1px solid #e5e7eb;
+      padding: 20px;
+    }
+    .run-card h3 { font-size: 0.9em; font-weight: 600; margin-bottom: 6px; }
+    .run-card p { font-size: 0.82em; color: #6b7280; margin-bottom: 16px; line-height: 1.5; }
+
+    .options { display: flex; gap: 12px; margin-bottom: 12px; flex-wrap: wrap; }
+    .toggle-opt {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82em;
+      cursor: pointer;
+      color: #374151;
+    }
+
+    /* ── Status badge ── */
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 3px 10px;
+      border-radius: 20px;
+      font-size: 0.78em;
+      font-weight: 600;
+    }
+    .status-idle    { background: #f3f4f6; color: #6b7280; }
+    .status-running { background: #fef9c3; color: #854d0e; }
+    .status-done    { background: #dcfce7; color: #15803d; }
+    .status-error   { background: #fee2e2; color: #dc2626; }
+
+    /* ── Log ── */
+    .log-wrap {
+      background: #0f172a;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 12px;
+      max-height: 420px;
+      overflow-y: auto;
+    }
+    #log {
+      font-family: 'Courier New', monospace;
+      font-size: 0.78em;
+      color: #94a3b8;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.6;
+    }
+    .log-hint { font-size: 0.8em; color: #9ca3af; margin-top: 8px; }
+
+    /* ── Reports tab ── */
+    .report-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .report-item:last-child { border-bottom: none; }
+    .report-item a { color: #2563eb; text-decoration: none; font-weight: 500; font-size: 0.9em; }
+    .report-item a:hover { text-decoration: underline; }
+    .report-date { color: #6b7280; font-size: 0.82em; }
+    .empty-state { color: #9ca3af; font-size: 0.88em; padding: 20px 0; }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <header>
+    <h1>🔍 Job Scraper</h1>
+    <span id="profile-label">Loading...</span>
+  </header>
+
+  <nav>
+    <button class="active" onclick="showTab('profile', this)">Profile</button>
+    <button onclick="showTab('run', this)">Run</button>
+    <button onclick="showTab('reports', this)">Reports</button>
+  </nav>
+
+  <!-- ══════════════ TAB: PROFILE ══════════════ -->
+  <div id="tab-profile" class="tab visible">
+
+    <div class="card">
+      <h2>Your profile</h2>
+
+      <div class="field">
+        <label>Name</label>
+        <input type="text" id="f-name" placeholder="e.g. Alice Dupont">
+      </div>
+
+      <div class="field">
+        <label>Role description
+          <span class="hint">Free text — used by the discovery agent to find relevant companies</span>
+        </label>
+        <textarea id="f-role" placeholder="e.g. power/energy trader, 5 years experience, European markets"></textarea>
+      </div>
+
+      <div class="field">
+        <label>Target locations</label>
+        <div class="locations-grid" id="locations-grid"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Keywords</h2>
+
+      <div class="field">
+        <label>Include
+          <span class="hint">Job titles / phrases that match your target roles — press Enter or comma to add</span>
+        </label>
+        <div class="chips" id="chips-include" onclick="focusInput('input-include')">
+          <input class="chip-input" id="input-include" placeholder="e.g. power trader, portfolio manager…"
+                 onkeydown="handleChipKey(event,'include')" oninput="handleChipInput(event,'include')">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>Exclude
+          <span class="hint">Anything in a job title that should disqualify it — press Enter or comma to add</span>
+        </label>
+        <div class="chips" id="chips-exclude" onclick="focusInput('input-exclude')">
+          <input class="chip-input" id="input-exclude" placeholder="e.g. coal, intern, junior…"
+                 onkeydown="handleChipKey(event,'exclude')" oninput="handleChipInput(event,'input-exclude')">
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Advanced</h2>
+
+      <div class="field">
+        <label>Sectors
+          <span class="hint">Guides company discovery — comma separated</span>
+        </label>
+        <input type="text" id="f-sectors" placeholder="e.g. energy trading, power, renewables, commodities">
+      </div>
+
+      <div class="field">
+        <label>Max companies to discover</label>
+        <input type="text" id="f-maxco" placeholder="40" style="width:100px">
+      </div>
+    </div>
+
+    <div class="save-bar">
+      <button class="btn btn-primary" onclick="saveProfile()">Save profile</button>
+      <span class="save-msg" id="save-msg">✓ Saved</span>
+    </div>
+
+  </div>
+
+  <!-- ══════════════ TAB: RUN ══════════════ -->
+  <div id="tab-run" class="tab">
+
+    <div class="run-grid">
+
+      <div class="run-card">
+        <h3>S1 — Scraper (hardcoded companies)</h3>
+        <p>Scrapes ~30 pre-configured companies using your profile keywords.</p>
+        <div class="options">
+          <label class="toggle-opt"><input type="checkbox" id="opt-new-only"> New jobs only</label>
+          <label class="toggle-opt"><input type="checkbox" id="opt-no-html"> No HTML report</label>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="runScraper()" id="btn-scraper">
+          ▶ Run Scraper
+        </button>
+      </div>
+
+      <div class="run-card">
+        <h3>S2 — Pipeline (agent discovery)</h3>
+        <p>Agents discover new companies from your profile, generate configs, validate, then scrape.</p>
+        <br>
+        <button class="btn btn-green btn-sm" onclick="runPipeline()" id="btn-pipeline">
+          ▶ Run Pipeline
+        </button>
+      </div>
+
+    </div>
+
+    <div class="run-card" style="margin-bottom:16px">
+      <h3>Healthcheck</h3>
+      <p style="margin-bottom:12px">Validates all S1 configs — detects broken ones and diagnoses the cause.</p>
+      <button class="btn btn-secondary btn-sm" onclick="runHealthcheck()" id="btn-hc">
+        ▶ Run Healthcheck
+      </button>
+    </div>
+
+    <div class="card" style="margin-bottom:0">
+      <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:10px">
+        <span style="font-weight:600; font-size:0.9em">Logs</span>
+        <div style="display:flex; align-items:center; gap:12px">
+          <span id="status-badge" class="status-badge status-idle">Idle</span>
+          <button class="btn btn-secondary btn-sm" onclick="clearLog()">Clear</button>
+        </div>
+      </div>
+      <div class="log-wrap">
+        <pre id="log">Ready. Press a button above to start.</pre>
+      </div>
+      <div id="report-link" style="display:none; margin-top:12px">
+        <a id="report-link-a" href="#" target="_blank" class="btn btn-secondary btn-sm">
+          📄 Open HTML report
+        </a>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- ══════════════ TAB: REPORTS ══════════════ -->
+  <div id="tab-reports" class="tab">
+    <div class="card">
+      <h2>Past reports</h2>
+      <div id="reports-list"><div class="empty-state">No reports yet.</div></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+// ── Locations disponibles ─────────────────────────────────────────────────────
+const ALL_LOCATIONS = [
+  "London", "Geneva", "Zurich", "Amsterdam", "Paris",
+  "Frankfurt", "Oslo", "Stockholm", "Brussels", "Vienna",
+  "Dubai", "Singapore", "New York", "Remote"
+];
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let includeChips = [];
+let excludeChips = [];
+let activeRun = null;
+let eventSource = null;
+
+// ── Tabs ──────────────────────────────────────────────────────────────────────
+function showTab(name, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('visible'));
+  document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('visible');
+  btn.classList.add('active');
+  if (name === 'reports') loadReports();
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  buildLocationGrid();
+  loadProfile();
+});
+
+function buildLocationGrid() {
+  const grid = document.getElementById('locations-grid');
+  ALL_LOCATIONS.forEach(loc => {
+    const pill = document.createElement('label');
+    pill.className = 'loc-pill';
+    pill.dataset.loc = loc;
+    pill.innerHTML = `<input type="checkbox" value="${loc}"> ${loc}`;
+    pill.querySelector('input').addEventListener('change', () => {
+      pill.classList.toggle('checked', pill.querySelector('input').checked);
+    });
+    grid.appendChild(pill);
+  });
+}
+
+// ── Profile load/save ─────────────────────────────────────────────────────────
+async function loadProfile() {
+  try {
+    const res = await fetch('/api/profile');
+    const p = await res.json();
+    applyProfile(p);
+  } catch (e) {
+    console.warn('Could not load profile', e);
+  }
+}
+
+function applyProfile(p) {
+  document.getElementById('f-name').value = p.name || '';
+  document.getElementById('f-role').value = p.role_description || '';
+  document.getElementById('f-sectors').value = (p.sectors || []).join(', ');
+  document.getElementById('f-maxco').value = p.max_companies || 40;
+
+  // Update header label
+  const label = p.name || p.role_description || 'No profile';
+  document.getElementById('profile-label').textContent = label;
+
+  // Locations
+  const locs = p.locations || [];
+  document.querySelectorAll('.loc-pill').forEach(pill => {
+    const checked = locs.includes(pill.dataset.loc);
+    pill.querySelector('input').checked = checked;
+    pill.classList.toggle('checked', checked);
+  });
+
+  // Keywords chips
+  includeChips = p.keywords_include || [];
+  excludeChips = p.keywords_exclude || [];
+  renderChips('include');
+  renderChips('exclude');
+}
+
+async function saveProfile() {
+  const profile = readForm();
+  try {
+    await fetch('/api/profile', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(profile),
+    });
+    document.getElementById('profile-label').textContent =
+      profile.name || profile.role_description || 'Profile';
+    flashSave();
+  } catch (e) {
+    alert('Could not save profile: ' + e);
+  }
+}
+
+function readForm() {
+  const locations = [];
+  document.querySelectorAll('.loc-pill input:checked').forEach(i => locations.push(i.value));
+
+  const sectors = document.getElementById('f-sectors').value
+    .split(',').map(s => s.trim()).filter(Boolean);
+
+  return {
+    name: document.getElementById('f-name').value.trim(),
+    role_description: document.getElementById('f-role').value.trim(),
+    sectors,
+    locations,
+    keywords_include: [...includeChips],
+    keywords_exclude: [...excludeChips],
+    max_companies: parseInt(document.getElementById('f-maxco').value) || 40,
+  };
+}
+
+function flashSave() {
+  const el = document.getElementById('save-msg');
+  el.classList.add('visible');
+  setTimeout(() => el.classList.remove('visible'), 2200);
+}
+
+// ── Chips ─────────────────────────────────────────────────────────────────────
+function renderChips(type) {
+  const container = document.getElementById('chips-' + type);
+  const input = document.getElementById('input-' + type);
+  // Retirer les anciens chips (garder l'input)
+  container.querySelectorAll('.chip').forEach(c => c.remove());
+  const chips = type === 'include' ? includeChips : excludeChips;
+  chips.forEach((kw, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'chip' + (type === 'exclude' ? ' exclude' : '');
+    chip.innerHTML = `${kw} <button onclick="removeChip('${type}',${i})">×</button>`;
+    container.insertBefore(chip, input);
+  });
+}
+
+function addChip(type, value) {
+  value = value.trim().toLowerCase();
+  if (!value) return;
+  const arr = type === 'include' ? includeChips : excludeChips;
+  if (!arr.includes(value)) {
+    arr.push(value);
+    renderChips(type);
+  }
+  document.getElementById('input-' + type).value = '';
+}
+
+function removeChip(type, index) {
+  if (type === 'include') includeChips.splice(index, 1);
+  else excludeChips.splice(index, 1);
+  renderChips(type);
+}
+
+function handleChipKey(e, type) {
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    addChip(type, e.target.value.replace(/,$/, ''));
+  } else if (e.key === 'Backspace' && !e.target.value) {
+    const arr = type === 'include' ? includeChips : excludeChips;
+    if (arr.length) { arr.pop(); renderChips(type); }
+  }
+}
+
+function handleChipInput(e, type) {
+  // Si l'utilisateur colle plusieurs valeurs séparées par des virgules
+  if (e.target.value.includes(',')) {
+    e.target.value.split(',').forEach(v => addChip(type, v));
+    e.target.value = '';
+  }
+}
+
+function focusInput(id) { document.getElementById(id).focus(); }
+
+// ── Run ───────────────────────────────────────────────────────────────────────
+async function runScraper() {
+  // Auto-save profile avant de lancer
+  await saveProfile();
+  const opts = {
+    new_only: document.getElementById('opt-new-only').checked,
+    no_html: document.getElementById('opt-no-html').checked,
+  };
+  await startRun('/api/run/scraper', opts, 'btn-scraper');
+}
+
+async function runPipeline() {
+  await saveProfile();
+  await startRun('/api/run/pipeline', {}, 'btn-pipeline');
+}
+
+async function runHealthcheck() {
+  await startRun('/api/run/healthcheck', {}, 'btn-hc');
+}
+
+async function startRun(endpoint, body, btnId) {
+  if (activeRun) {
+    if (!confirm('A run is already in progress. Start a new one?')) return;
+    if (eventSource) { eventSource.close(); eventSource = null; }
+  }
+
+  document.getElementById('report-link').style.display = 'none';
+  setLog('Starting…');
+  setStatus('running');
+  disableButtons(true);
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const { run_id } = await res.json();
+    activeRun = run_id;
+    streamLogs(run_id);
+  } catch (e) {
+    setLog('Error: ' + e);
+    setStatus('error');
+    disableButtons(false);
+  }
+}
+
+function streamLogs(runId) {
+  eventSource = new EventSource(`/api/run/${runId}/stream`);
+  const logEl = document.getElementById('log');
+
+  eventSource.onmessage = (e) => {
+    const line = JSON.parse(e.data);
+    if (line === '__DONE__') {
+      eventSource.close();
+      eventSource = null;
+      activeRun = null;
+      checkForReport();
+      disableButtons(false);
+      // Status will be updated by checkDoneStatus
+      setTimeout(checkDoneStatus, 300);
+      return;
+    }
+    if (logEl.textContent === 'Ready. Press a button above to start.' ||
+        logEl.textContent === 'Starting…') {
+      logEl.textContent = '';
+    }
+    logEl.textContent += line + '\n';
+    // Auto-scroll
+    logEl.parentElement.scrollTop = logEl.parentElement.scrollHeight;
+  };
+
+  eventSource.onerror = () => {
+    eventSource.close();
+    eventSource = null;
+    setStatus('error');
+    disableButtons(false);
+  };
+}
+
+async function checkDoneStatus() {
+  if (!activeRun) {
+    // Use last run_id from stream (we don't store it after clear)
+    return;
+  }
+  // Actually we clear activeRun above, so just set done here
+  setStatus('done');
+}
+
+// Called when stream ends — check if a new rapport was generated
+async function checkForReport() {
+  try {
+    const res = await fetch('/api/reports');
+    const reports = await res.json();
+    if (reports.length) {
+      const latest = reports[0];
+      // Check if it was generated in the last 2 minutes
+      document.getElementById('report-link-a').href = latest.url;
+      document.getElementById('report-link-a').textContent = `📄 Open report — ${latest.label}`;
+      document.getElementById('report-link').style.display = 'block';
+    }
+  } catch (e) {}
+  setStatus('done');
+}
+
+function setStatus(s) {
+  const badge = document.getElementById('status-badge');
+  badge.className = 'status-badge status-' + s;
+  badge.textContent = s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function setLog(text) {
+  document.getElementById('log').textContent = text;
+}
+
+function clearLog() {
+  setLog('Ready. Press a button above to start.');
+  setStatus('idle');
+  document.getElementById('report-link').style.display = 'none';
+}
+
+function disableButtons(disabled) {
+  ['btn-scraper', 'btn-pipeline', 'btn-hc'].forEach(id => {
+    document.getElementById(id).disabled = disabled;
+  });
+}
+
+// ── Reports ───────────────────────────────────────────────────────────────────
+async function loadReports() {
+  try {
+    const res = await fetch('/api/reports');
+    const reports = await res.json();
+    const el = document.getElementById('reports-list');
+    if (!reports.length) {
+      el.innerHTML = '<div class="empty-state">No reports yet. Run the scraper to generate one.</div>';
+      return;
+    }
+    el.innerHTML = reports.map(r => `
+      <div class="report-item">
+        <a href="${r.url}" target="_blank">${r.label}</a>
+        <span class="report-date">${r.file}</span>
+      </div>
+    `).join('');
+  } catch (e) {
+    document.getElementById('reports-list').innerHTML =
+      '<div class="empty-state">Could not load reports.</div>';
+  }
+}
+</script>
+</body>
+</html>
