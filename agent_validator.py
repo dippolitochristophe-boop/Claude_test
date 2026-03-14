@@ -78,6 +78,7 @@ def _claude_diagnose(company: str, config: dict, scrape_log: str, jobs_raw_count
     """
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
+    log_trimmed = scrape_log[-800:] if len(scrape_log) > 800 else scrape_log
     prompt = f"""Tu es expert en web scraping de portails de recrutement (ATS).
 
 Contexte : le scraper tente de collecter les offres d'emploi de **{company}**.
@@ -88,7 +89,7 @@ Config utilisée :
 
 Log de scraping (validate_mode=True, sans filtre métier) :
 ```
-{scrape_log}
+{log_trimmed}
 ```
 
 Résultat : **{jobs_raw_count} job(s) brut(s) trouvé(s)**.
@@ -114,10 +115,11 @@ def _validate_html_site(s: dict, pw_page=None) -> dict:
     Valide un site HTML.
     Retourne {raw: int, raw_titles: list, filtered: int, strategy: str, log: str}.
     """
+    from job_scrapper import is_relevant_title
     buf = StringIO()
     with redirect_stdout(buf):
         jobs_raw, strategy = smart_scrape_site(s, pw_page, validate_mode=True)
-        jobs_filtered, _   = smart_scrape_site(s, pw_page, validate_mode=False)
+    jobs_filtered = [j for j in jobs_raw if is_relevant_title(j["title"])]
 
     return {
         "raw":        len(jobs_raw),

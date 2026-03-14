@@ -149,9 +149,10 @@ def _navigate(page, url: str) -> str:
     Navigation avec fallback progressif.
     Retourne 'networkidle' | 'load' | 'domcontentloaded' | 'error'.
     """
+    timeouts = {"networkidle": 8000, "load": 15000, "domcontentloaded": 15000}
     for wait_until in ("networkidle", "load", "domcontentloaded"):
         try:
-            page.goto(url, wait_until=wait_until, timeout=30000)
+            page.goto(url, wait_until=wait_until, timeout=timeouts[wait_until])
             return wait_until
         except Exception:
             continue
