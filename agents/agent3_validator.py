@@ -237,7 +237,7 @@ Be direct and technical.\
 """
     msg = client.messages.create(
         model=MODEL,
-        max_tokens=200,
+        max_tokens=150,
         messages=[{"role": "user", "content": prompt}],
     )
     return msg.content[0].text.strip()

@@ -15,6 +15,7 @@ def run_agent(
     tools: list,
     max_turns: int = 10,
     model: str = MODEL,
+    max_tokens: int = 1024,
     progress_cb=None,
 ) -> str:
     """
@@ -33,7 +34,7 @@ def run_agent(
     for turn in range(max_turns):
         kwargs = dict(
             model=model,
-            max_tokens=4096,
+            max_tokens=max_tokens,
             system=system,
             messages=messages,
         )

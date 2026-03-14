@@ -79,32 +79,15 @@ def _claude_diagnose(company: str, config: dict, scrape_log: str, jobs_raw_count
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
     log_trimmed = scrape_log[-800:] if len(scrape_log) > 800 else scrape_log
-    prompt = f"""Tu es expert en web scraping de portails de recrutement (ATS).
+    prompt = f"""ATS scraping for {company} returned {jobs_raw_count} jobs.
+Config: {config}
+Log: {log_trimmed}
 
-Contexte : le scraper tente de collecter les offres d'emploi de **{company}**.
-Config utilisée :
-```json
-{config}
-```
-
-Log de scraping (validate_mode=True, sans filtre métier) :
-```
-{log_trimmed}
-```
-
-Résultat : **{jobs_raw_count} job(s) brut(s) trouvé(s)**.
-
-{"Le scraping échoue complètement (0 résultat même sans filtre métier)." if jobs_raw_count == 0 else f"Le scraping trouve {jobs_raw_count} jobs bruts mais 0 après le filtre de pertinence métier."}
-
-En 3-4 lignes maximum, donne :
-1. La cause la plus probable (ex: URL obsolète, job_pattern incorrect, cookie consent non géré, API non reconnue avec clés {'{...}'}...)
-2. Une suggestion concrète de fix (ex: changer job_pattern en "/X/", ajouter clé "Y" dans JOB_LIST_KEYS, ou vérifier manuellement l'URL)
-
-Sois direct et technique. Pas de blabla."""
+2 sentences: most likely cause + concrete fix (URL/tenant/site/job_pattern/cookie/API key)."""
 
     msg = client.messages.create(
         model=MODEL,
-        max_tokens=300,
+        max_tokens=150,
         messages=[{"role": "user", "content": prompt}],
     )
     return msg.content[0].text.strip()
