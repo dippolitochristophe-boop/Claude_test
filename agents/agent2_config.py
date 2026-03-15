@@ -181,14 +181,14 @@ End your response with the JSON object only.\
     # Fallback Python : si ATS toujours inconnu → construire URL LinkedIn depuis le nom
     # Plus fiable que de demander au LLM (évite de brûler un turn supplémentaire)
     if result.get("ats_type") == "unknown":
-        slug = re.sub(r"[^a-z0-9]+", "-", company_name.lower()).strip("-")
+        keywords = company_name.replace(" ", "+")
         result["ats_type"] = "linkedin"
         result["config"] = {
             "name": company_name,
-            "linkedin_url": f"https://www.linkedin.com/company/{slug}/jobs/",
+            "linkedin_url": f"https://www.linkedin.com/jobs/search/?keywords={keywords}",
         }
         result["confidence"] = "probable"
-        result["notes"] = "No public ATS found — LinkedIn URL constructed from company name (verify slug)"
+        result["notes"] = "No public ATS found — LinkedIn search URL (always works, no slug guessing)"
 
     # Sauvegarder par entreprise
     safe_name = re.sub(r"[^a-z0-9]", "_", company_name.lower())
