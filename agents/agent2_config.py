@@ -50,7 +50,9 @@ a) web_search("{company} jobs site:linkedin.com")
    → LinkedIn aggregates postings from all ATS — snippets often contain "Apply on company website"
      URL which directly reveals the ATS (myworkdayjobs.com / smartrecruiters.com / greenhouse.io...)
    → If snippet contains an ATS URL → extract it immediately, skip b–f, go to STEP 2
-   → If only "Easy Apply" (no external URL) → continue to b
+   → If results show ONLY "Easy Apply" / "In Apply" with NO external URL → STOP immediately,
+     return ats_type="unknown" — company uses LinkedIn as their ATS, no public endpoint exists
+   → If 0 results → continue to b
 
 b) web_search("{company} site:myworkdayjobs.com")
    → Hit: extract tenant/wd/site DIRECTLY from the URL — NEVER guess
