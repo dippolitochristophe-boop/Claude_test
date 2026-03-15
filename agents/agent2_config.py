@@ -51,7 +51,8 @@ a) web_search("{company} jobs site:linkedin.com")
      URL which directly reveals the ATS (myworkdayjobs.com / smartrecruiters.com / greenhouse.io...)
    → If snippet contains an ATS URL → extract it immediately, skip b–f, go to STEP 2
    → If results show ONLY "Easy Apply" / "In Apply" with NO external URL → STOP immediately,
-     return ats_type="unknown" — company uses LinkedIn as their ATS, no public endpoint exists
+     return ats_type="linkedin" — extract the LinkedIn company slug from the URL in results
+     e.g. linkedin.com/company/hartree-partners → slug="hartree-partners"
    → If 0 results → continue to b
 
 b) web_search("{company} site:myworkdayjobs.com")
@@ -124,7 +125,7 @@ HTML <3 matches: try /jobs/, /careers/, /vacancies/, /en/careers/, /postings/
 
 ## Output: JSON object only, no prose
 
-{"name":"Company","ats_type":"workday|smartrecruiters|greenhouse|taleo|html|lever|unknown","config":{...},"confidence":"confirmed|probable|unknown|invalid","winning_query":"the site: search that found the URL","notes":"..."}
+{"name":"Company","ats_type":"workday|smartrecruiters|greenhouse|taleo|html|lever|linkedin|unknown","config":{...},"confidence":"confirmed|probable|unknown|invalid","winning_query":"the site: search that found the URL","notes":"..."}
 
 Config shapes:
 - Workday: {"name":"X","tenant":"x","site":"XCareerSite","wd":"wd3"}
@@ -133,6 +134,7 @@ Config shapes:
 - HTML: {"name":"X","type":"html","pages":["https://..."],"job_pattern":"/jobs/"}
 - Taleo: {"name":"X","base":"https://x.taleo.net"}
 - Lever: {"name":"X","lever_id":"company-slug"}
+- LinkedIn: {"name":"X","linkedin_url":"https://www.linkedin.com/company/{slug}/jobs/"}
 - unknown: {"name":"X"}
 """
 

@@ -60,6 +60,7 @@ def run_pipeline(profile: dict, target_companies: list = None, progress_cb=None)
 
     validated_configs = []
     broken = []
+    linkedin_only = []
 
     # Séquentiel — évite les rate limits (50k tokens/min avec 2 agents parallèles)
     for idx, company in enumerate(companies):
@@ -79,6 +80,8 @@ def run_pipeline(profile: dict, target_companies: list = None, progress_cb=None)
         elif r.get("validation_status") == "filter":
             validated_configs.append(r["config"])
             log(f"  ⚠️  {r['name']} — config OK, 0 offre pertinente pour ce profil")
+        elif r.get("validation_status") == "linkedin":
+            linkedin_only.append(r)
         else:
             broken.append(r)
             log(f"  ❌ {r['name']} — {r.get('diagnosis', r.get('validation_status', 'broken'))}")
@@ -99,9 +102,15 @@ def run_pipeline(profile: dict, target_companies: list = None, progress_cb=None)
     log("\n" + "═" * 60)
     log(f"✅ Pipeline terminé en {elapsed}s")
     log(f"   {stats['validated']} configs validées | {stats['broken']} échouées | {stats['total']} total")
+    if linkedin_only:
+        log(f"\n🔗 Vérifier manuellement sur LinkedIn ({len(linkedin_only)}) :")
+        for r in linkedin_only:
+            url = r.get("diagnosis", "")
+            log(f"   • {r['name']} → {url}")
     log("═" * 60)
 
-    output = {"validated_configs": validated_configs, "broken": broken, "stats": stats}
+    stats["linkedin_only"] = len(linkedin_only)
+    output = {"validated_configs": validated_configs, "broken": broken, "linkedin_only": linkedin_only, "stats": stats}
     with open(os.path.join(tempfile.gettempdir(), "pipeline_result.json"), "w") as f:
         json.dump(output, f, indent=2, ensure_ascii=False)
 

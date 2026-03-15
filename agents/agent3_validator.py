@@ -59,6 +59,12 @@ def validate(agent2_result: dict, profile: dict = None, progress_cb=None) -> dic
     ats_type = agent2_result.get("ats_type", "unknown")
     config   = agent2_result.get("config", {})
 
+    if ats_type == "linkedin":
+        url = (config or {}).get("linkedin_url", f"https://www.linkedin.com/company/{name.lower().replace(' ', '-')}/jobs/")
+        if progress_cb:
+            progress_cb(f"  🔗 {name} — LinkedIn Easy Apply only: {url}")
+        return _result(name, "linkedin", 0, 0, None, url)
+
     if ats_type == "unknown" or not config:
         return _result(name, "skip", 0, 0, None, "ATS unknown — validation skipped")
 
