@@ -31,8 +31,8 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
 
 from agents.loop import run_agent
-from agents.tools import TOOLS
-from agents.memory import build_prompt_section, add_success, add_failure
+from agents.tools import TOOLS, web_search, web_fetch
+from agents.memory import build_prompt_section, add_success, add_failure, get_success
 
 # ── System prompt ──────────────────────────────────────────────────────────────
 # C'est ici que tout se joue. Le prompt doit être prescriptif, non ambigu,
@@ -139,72 +139,157 @@ Config shapes:
 """
 
 
+# ── Patterns ATS — recherche Python pure, zéro LLM ────────────────────────────
+# Ordre : du plus fréquent au moins fréquent dans le secteur energy/trading.
+# Pour chaque ATS : query DDG, regex d'extraction d'URL, builder de config.
+
+_ATS_PATTERNS = [
+    {
+        "ats_type": "workday",
+        "query": "{company} site:myworkdayjobs.com",
+        "url_re": r'([\w-]+)\.(wd\d+)\.myworkdayjobs\.com/([\w-]+)',
+        "build": lambda m, n: {"name": n, "tenant": m.group(1), "wd": m.group(2), "site": m.group(3)},
+    },
+    {
+        "ats_type": "smartrecruiters",
+        "query": "{company} site:jobs.smartrecruiters.com",
+        "url_re": r'smartrecruiters\.com/([\w-]+)',
+        "build": lambda m, n: {"name": n, "sr_id": m.group(1)},
+    },
+    {
+        "ats_type": "greenhouse",
+        "query": "{company} site:boards.greenhouse.io",
+        "url_re": r'((?:boards(?:-api)?|job-boards)(?:\.eu)?\.greenhouse\.io)/(?:v\d+/boards/)?([\w-]+)',
+        "build": lambda m, n: {"name": n, "board_token": m.group(2), "region": "eu" if ".eu." in m.group(1) else "us"},
+    },
+    {
+        "ats_type": "lever",
+        "query": "{company} site:jobs.lever.co",
+        "url_re": r'jobs\.lever\.co/([\w-]+)',
+        "build": lambda m, n: {"name": n, "lever_id": m.group(1)},
+    },
+    {
+        "ats_type": "ashby",
+        "query": "{company} site:ashbyhq.com",
+        "url_re": r'ashbyhq\.com/([\w-]+)',
+        "build": lambda m, n: {"name": n, "lever_id": m.group(1)},
+    },
+]
+
+# Domaines careers standards à tenter en fallback web_fetch
+_CAREERS_URL_TEMPLATES = [
+    "https://careers.{slug}.com",
+    "https://www.{slug}.com/careers",
+    "https://{slug}.com/careers",
+]
+
+
 # ── Main function ──────────────────────────────────────────────────────────────
 
 def generate_config(company_name: str, domain: str = None, progress_cb=None) -> dict:
     """
-    Génère la config ATS pour une entreprise.
-    Retourne le dict de résultat (name, ats_type, config, confidence, notes).
+    Génère la config ATS pour une entreprise — Python-first, zéro LLM.
+
+    Ordre :
+      0. Cache mémoire → retour immédiat si déjà validé (0 token)
+      1. Boucle Python : 5 web_search ATS-specific, stop au premier hit
+      2. web_fetch fallback : careers page, parse "ATS URLS FOUND:" injecté par tools.py
+      3. Fallback linkedin : ats_type=linkedin, vérification manuelle
     """
-    domain_info = (
-        f"Known careers domain: {domain}"
-        if domain
-        else "Careers domain: unknown — find it first with web_search"
-    )
+    def log(msg):
+        if progress_cb:
+            progress_cb(msg)
 
-    user_msg = f"""\
-Generate the scraper config for: **{company_name}**
-{domain_info}
+    log(f"Agent 2 — {company_name}: identifying ATS...")
 
-Follow the 4-step method exactly. Validate before concluding.
-End your response with the JSON object only.\
-"""
-
-    if progress_cb:
-        progress_cb(f"Agent 2 — {company_name}: identifying ATS...")
-
-    result_text = run_agent(
-        system=SYSTEM + build_prompt_section(),
-        user_message=user_msg,
-        tools=TOOLS,
-        max_turns=7,
-        max_tokens=800,
-        progress_cb=progress_cb,
-    )
-
-    result = _extract_json_object(result_text)
-    if not result:
-        result = {
+    # ── Step 0 : Cache mémoire ─────────────────────────────────────────────────
+    cached = get_success(company_name)
+    if cached and cached.get("config"):
+        log(f"  ✅ {company_name} → {cached['ats_type']} (cache)")
+        return {
             "name": company_name,
-            "ats_type": "unknown",
-            "config": {"name": company_name},
-            "confidence": "unknown",
-            "notes": f"Failed to parse agent output. Raw: {result_text[:300]}",
+            "ats_type": cached["ats_type"],
+            "config": cached["config"],
+            "confidence": "confirmed",
+            "winning_query": cached.get("winning_query", ""),
+            "notes": "from memory cache — 0 tokens",
         }
 
-    # Fallback Python : si ATS toujours inconnu → construire URL LinkedIn depuis le nom
-    # Plus fiable que de demander au LLM (évite de brûler un turn supplémentaire)
-    if result.get("ats_type") == "unknown":
-        result["ats_type"] = "linkedin"
-        result["config"] = {"name": company_name}
-        result["confidence"] = "probable"
-        result["notes"] = "No public ATS found — check LinkedIn manually"
+    # ── Step 1 : Boucle Python — 5 searches ATS, stop au premier hit ───────────
+    for pat in _ATS_PATTERNS:
+        query = pat["query"].replace("{company}", company_name)
+        log(f"  [web_search] {query}")
+        result = web_search(query, max_results=5)
+        m = re.search(pat["url_re"], result)
+        if m:
+            config = pat["build"](m, company_name)
+            log(f"  → {pat['ats_type']} trouvé : {m.group(0)}")
+            return _finalize(company_name, pat["ats_type"], config, "confirmed",
+                             query, m.group(0), progress_cb)
 
-    # Sauvegarder par entreprise
+    # ── Step 2 : web_fetch fallback ────────────────────────────────────────────
+    slug = re.sub(r"[^a-z0-9]", "", company_name.lower())
+    careers_urls = [t.replace("{slug}", slug) for t in _CAREERS_URL_TEMPLATES]
+    if domain:
+        careers_urls.insert(0, f"https://careers.{domain}")
+
+    for url in careers_urls:
+        log(f"  [web_fetch] {url}")
+        page = web_fetch(url)
+        if "HTTP 4" in page[:20] or "HTTP 5" in page[:20]:
+            continue
+        # tools.py injecte "ATS URLS FOUND: url1 | url2" avant le texte
+        if "ATS URLS FOUND:" in page:
+            ats_line = page.split("ATS URLS FOUND:")[1].split("\n")[0]
+            for pat in _ATS_PATTERNS:
+                m = re.search(pat["url_re"], ats_line)
+                if m:
+                    config = pat["build"](m, company_name)
+                    return _finalize(company_name, pat["ats_type"], config, "confirmed",
+                                     url, m.group(0), progress_cb)
+        # JSON-LD JobPosting détecté → HTML site avec scraping direct
+        if "JSON-LD JobPostings found:" in page:
+            html_config = {"name": company_name, "type": "html",
+                           "pages": [url], "job_pattern": "/job"}
+            return _finalize(company_name, "html", html_config, "probable",
+                             url, url, progress_cb)
+
+    # ── Step 3 : Fallback linkedin ─────────────────────────────────────────────
+    log(f"  🔗 {company_name} — aucun ATS public trouvé")
+    result = {
+        "name": company_name,
+        "ats_type": "linkedin",
+        "config": {"name": company_name},
+        "confidence": "probable",
+        "winning_query": "",
+        "notes": "No public ATS found — check LinkedIn manually",
+    }
+    _save_result(company_name, result)
+    log(f"  🔧 {company_name} → linkedin (probable)")
+    return result
+
+
+def _finalize(company_name, ats_type, config, confidence, winning_query, url_found, progress_cb):
+    result = {
+        "name": company_name,
+        "ats_type": ats_type,
+        "config": config,
+        "confidence": confidence,
+        "winning_query": winning_query,
+        "notes": url_found,
+    }
+    _save_result(company_name, result)
+    if progress_cb:
+        icons = {"confirmed": "✅", "probable": "🔧"}
+        progress_cb(f"  {icons.get(confidence, '❓')} {company_name} → {ats_type} ({confidence})")
+    return result
+
+
+def _save_result(company_name, result):
     safe_name = re.sub(r"[^a-z0-9]", "_", company_name.lower())
     path = os.path.join(tempfile.gettempdir(), f"agent2_{safe_name}.json")
     with open(path, "w") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
-
-    if progress_cb:
-        icons = {"confirmed": "✅", "probable": "🔧", "unknown": "❓", "invalid": "❌"}
-        icon = icons.get(result.get("confidence", "unknown"), "❓")
-        progress_cb(
-            f"  {icon} {company_name} → {result.get('ats_type', '?')} "
-            f"({result.get('confidence', '?')})"
-        )
-
-    return result
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────

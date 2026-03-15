@@ -63,6 +63,15 @@ def add_failure(company: str, tried_queries: list, reason: str):
     _save(m)
 
 
+def get_success(company_name: str) -> dict | None:
+    """Retourne la config mémorisée pour une boîte (confirmed), ou None."""
+    key = company_name.lower().strip()
+    for s in load().get("successes", []):
+        if s.get("company", "").lower().strip() == key and s.get("config"):
+            return s
+    return None
+
+
 def build_prompt_section() -> str:
     """
     Retourne un bloc texte (~200-350 tokens) injecté dans le SYSTEM d'Agent 2.
