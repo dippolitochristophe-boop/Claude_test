@@ -31,7 +31,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
 
 from agents.loop import run_agent
-from agents.tools import TOOLS, web_search
+from agents.tools import TOOLS
 from agents.memory import build_prompt_section, add_success, add_failure
 
 # ── System prompt ──────────────────────────────────────────────────────────────
@@ -43,8 +43,10 @@ You are an expert in reverse-engineering corporate Applicant Tracking Systems (A
 Mission: find the EXACT config to scrape job postings from a company's careers portal.
 
 ## CRITICAL RULES
-- ONE tool call per turn. STRICTLY execute steps a→e in alphabetical order. NO other searches.
-- Stop at first hit and go to STEP 2. Never add extra searches between steps.
+- ONE tool call per turn.
+- STRICTLY execute steps a→e in alphabetical order. NO other searches, NO deviations.
+- **AS SOON AS one step returns a hit → STOP all searches. Go directly to STEP 2 then STEP 3. Output JSON.**
+- Every extra search costs money. Do not search past the first hit.
 
 ## STEP 1 — Find exact ATS URL (execute a→e in strict order, one per turn)
 
@@ -181,19 +183,10 @@ End your response with the JSON object only.\
     # Fallback Python : si ATS toujours inconnu → construire URL LinkedIn depuis le nom
     # Plus fiable que de demander au LLM (évite de brûler un turn supplémentaire)
     if result.get("ats_type") == "unknown":
-        # Chercher le slug exact de la page entreprise LinkedIn
-        search_result = web_search(f"site:linkedin.com/company {company_name}", max_results=3)
-        slug_match = re.search(r'linkedin\.com/company/([\w-]+)', search_result)
-        if slug_match:
-            slug = slug_match.group(1)
-            linkedin_url = f"https://www.linkedin.com/company/{slug}/jobs/"
-        else:
-            keywords = company_name.replace(" ", "+")
-            linkedin_url = f"https://www.linkedin.com/jobs/search/?keywords={keywords}"
         result["ats_type"] = "linkedin"
-        result["config"] = {"name": company_name, "linkedin_url": linkedin_url}
+        result["config"] = {"name": company_name}
         result["confidence"] = "probable"
-        result["notes"] = f"No public ATS found — {linkedin_url}"
+        result["notes"] = "No public ATS found — check LinkedIn manually"
 
     # Sauvegarder par entreprise
     safe_name = re.sub(r"[^a-z0-9]", "_", company_name.lower())
