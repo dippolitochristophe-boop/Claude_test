@@ -163,7 +163,7 @@ End your response with the JSON object only.\
         system=SYSTEM + build_prompt_section(),
         user_message=user_msg,
         tools=TOOLS,
-        max_turns=4,
+        max_turns=6,
         max_tokens=800,
         progress_cb=progress_cb,
     )

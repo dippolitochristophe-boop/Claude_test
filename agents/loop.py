@@ -80,9 +80,12 @@ def run_agent(
             messages.append({"role": "user", "content": tool_results})
 
         else:
-            # stop_reason inattendu (max_tokens...)
+            # stop_reason inattendu (max_tokens...) — retourner le texte accumulé si présent
             if progress_cb:
                 progress_cb(f"  [warn] stop_reason={response.stop_reason}, turn={turn}")
-            break
+            partial = "".join(
+                block.text for block in response.content if block.type == "text"
+            ).strip()
+            return partial if partial else "__MAX_TURNS_REACHED__"
 
     return "__MAX_TURNS_REACHED__"
