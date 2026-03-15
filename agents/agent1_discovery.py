@@ -62,6 +62,7 @@ Task: find companies hiring profiles like the one described.
 - Max {max_companies} companies — quality over quantity
 - Unknown domain → null (never invent)
 - Final answer: valid JSON array only, no prose
+- **One tool call per turn. 3 searches maximum total.**
 
 Format: [{"name": "...", "domain": "...", "hq": "...", "sector": "..."}, ...]
 """
@@ -102,7 +103,7 @@ Search the web thoroughly, then return a JSON array of companies.\
         system=system,
         user_message=user_msg,
         tools=SEARCH_ONLY_TOOLS,
-        max_turns=6,
+        max_turns=4,
         max_tokens=800,
         progress_cb=progress_cb,
     )

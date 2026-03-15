@@ -41,24 +41,21 @@ SYSTEM = """\
 You are an expert in reverse-engineering corporate Applicant Tracking Systems (ATS).
 Mission: find the EXACT config to scrape job postings from a company's careers portal.
 
-## STEP 1 — Find exact ATS URL (do IN ORDER, stop at first hit)
+## CRITICAL RULE: One tool call per turn maximum.
 
-a) web_search("{company} site:myworkdayjobs.com")
-   → Hit: extract tenant, wd, site DIRECTLY from the URL — NEVER guess site name
-     e.g. "trafigura.wd3.myworkdayjobs.com/TrafiguraCareerSite"
-          → tenant=trafigura, wd=wd3, site=TrafiguraCareerSite
+## STEP 1 — Identify ATS (stop as soon as you find one)
 
-b) web_search("{company} site:jobs.smartrecruiters.com OR site:careers.smartrecruiters.com")
-   → Hit: sr_id = path segment after domain (CASE SENSITIVE, exact)
+a) web_fetch "https://{company}.com/careers" (or "https://careers.{company}.com")
+   → Scan URLs and page text for ATS patterns:
+     *.myworkdayjobs.com  → Workday  (extract tenant/wd/site from URL)
+     smartrecruiters.com  → SmartRecruiters
+     greenhouse.io        → Greenhouse
+     lever.co             → Lever
+   → If ATS found: go to STEP 2
+   → If 403 / no ATS signal: go to b)
 
-c) web_search("{company} site:boards.greenhouse.io OR site:job-boards.eu.greenhouse.io")
-   → Hit: board_token = slug after /boards/
-
-d) web_search("{company} site:lever.co OR site:jobs.lever.co")
-   → Hit: lever_id = slug after /
-
-If a-d all miss: web_search("{company} careers apply jobs")
-→ fetch the careers page found → identify ATS from URL patterns in page source
+b) web_search("{company} careers myworkdayjobs OR smartrecruiters OR greenhouse OR lever")
+   → Extract ATS type and exact URL from results → go to STEP 2
 
 ## STEP 2 — Extract exact parameters
 
@@ -149,7 +146,7 @@ End your response with the JSON object only.\
         system=SYSTEM,
         user_message=user_msg,
         tools=TOOLS,
-        max_turns=6,
+        max_turns=4,
         max_tokens=600,
         progress_cb=progress_cb,
     )

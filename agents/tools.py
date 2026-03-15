@@ -14,7 +14,7 @@ from bs4 import BeautifulSoup
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
     HAS_DDG = True
 except ImportError:
     HAS_DDG = False

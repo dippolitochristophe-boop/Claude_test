@@ -60,50 +60,31 @@ def run_pipeline(profile: dict, target_companies: list = None, progress_cb=None)
     validated_configs = []
     broken = []
 
-    # Traitement par batch de 2 (respecte les rate limits Anthropic)
-    batch_size = 2
-    batches = [companies[i:i+batch_size] for i in range(0, len(companies), batch_size)]
+    # Séquentiel — évite les rate limits (50k tokens/min avec 2 agents parallèles)
+    for idx, company in enumerate(companies):
+        log(f"\n  [{idx + 1}/{len(companies)}] {company['name']}")
+        try:
+            r = _process_company(company, profile, log)
+        except Exception as e:
+            log(f"  ❌ {company['name']} — unexpected error: {e}")
+            broken.append({"company": company, "error": str(e)})
+            continue
 
-    for batch_idx, batch in enumerate(batches):
-        log(f"\n  Batch {batch_idx + 1}/{len(batches)} — {[c['name'] for c in batch]}")
-
-        if len(batch) == 1:
-            # Pas de parallélisme pour les batches d'une seule entreprise
-            results = [_process_company(batch[0], profile, log)]
+        if r is None:
+            continue
+        if r.get("validation_status") == "ok":
+            validated_configs.append(r["config"])
+            log(f"  ✅ {r['name']} ajouté ({r['raw_count']} offres)")
+        elif r.get("validation_status") == "filter":
+            validated_configs.append(r["config"])
+            log(f"  ⚠️  {r['name']} — config OK, 0 offre pertinente pour ce profil")
         else:
-            # 2 en parallèle
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                futures = {
-                    executor.submit(_process_company, company, profile, log): company
-                    for company in batch
-                }
-                results = []
-                for future in as_completed(futures):
-                    try:
-                        results.append(future.result())
-                    except Exception as e:
-                        company = futures[future]
-                        log(f"  ❌ {company['name']} — unexpected error: {e}")
-                        broken.append({"company": company, "error": str(e)})
+            broken.append(r)
+            log(f"  ❌ {r['name']} — {r.get('diagnosis', r.get('validation_status', 'broken'))}")
 
-        for r in results:
-            if r is None:
-                continue
-            if r.get("validation_status") == "ok":
-                validated_configs.append(r["config"])
-                log(f"  ✅ {r['name']} ajouté ({r['raw_count']} offres)")
-            elif r.get("validation_status") == "filter":
-                # Config valide mais 0 offre pertinente pour CE profil
-                # On l'ajoute quand même — peut servir pour d'autres profils
-                validated_configs.append(r["config"])
-                log(f"  ⚠️  {r['name']} — config OK, 0 offre pertinente pour ce profil")
-            else:
-                broken.append(r)
-                log(f"  ❌ {r['name']} — {r.get('diagnosis', r.get('validation_status', 'broken'))}")
-
-        # Pause entre batches pour éviter les rate limits
-        if batch_idx < len(batches) - 1:
-            time.sleep(1)
+        # Pause pour respecter le rate limit tokens/min
+        if idx < len(companies) - 1:
+            time.sleep(3)
 
     # ── Résumé ───────────────────────────────────────────────────────────────
     elapsed = round(time.time() - start, 1)

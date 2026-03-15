@@ -4,7 +4,7 @@ beautifulsoup4
 flask
 playwright
 anthropic
-duckduckgo-search
+ddgs
 
 # After pip install, run:
 # playwright install chromium
