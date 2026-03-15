@@ -5,7 +5,7 @@
 ### 1. Toujours maintenir `requirements.txt`
 Quand tu ajoutes un `import` d'une lib tierce dans n'importe quel fichier Python,
 tu DOIS ajouter la dépendance dans `requirements.txt` dans le même commit.
-Libs tierces actuelles : `requests`, `urllib3`, `beautifulsoup4`, `flask`, `playwright`, `anthropic`, `duckduckgo-search`
+Libs tierces actuelles : `requests`, `urllib3`, `beautifulsoup4`, `flask`, `playwright`, `anthropic`, `duckduckgo-search`, `tenacity`, `pydantic`
 
 ### 2. Chemins fichiers — toujours cross-platform
 Ne jamais hardcoder `/tmp/`. Utiliser `os.path.join(tempfile.gettempdir(), ...)`.
@@ -51,6 +51,53 @@ Le LLM a tendance à sur-expliquer si on ne le contraint pas, ce qui consomme de
 #### Ne jamais demander au LLM ce que Python peut faire
 Si une opération est déterministe (construire une URL, normaliser un nom, déduplication), la faire en Python post-processing — pas dans un turn LLM supplémentaire.
 Exemple : LinkedIn URL fallback → Python, pas agent.
+
+### 5. HTTP retry — règle impérative
+
+Toute fonction qui appelle `requests.get/post` directement DOIT utiliser le décorateur tenacity défini dans `agents/agent3_validator.py` (`_HTTP_RETRY`).
+
+Pattern canonique :
+```python
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+
+_HTTP_RETRY = dict(
+    retry=retry_if_exception_type((requests.exceptions.ConnectionError,
+                                   requests.exceptions.Timeout,
+                                   requests.exceptions.ChunkedEncodingError)),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    reraise=True,
+)
+
+@retry(**_HTTP_RETRY)
+def _my_http_call(...):
+    ...
+```
+
+**Ne jamais retenter sur `HTTPError`** (4xx/5xx) — une 404 = config incorrecte, pas une erreur réseau.
+Exception : `_validate_html` (boucle multi-URL avec `except: pass` intentionnel) et `_validate_greenhouse` (logique EU→US 404 fallback — utilise le helper `_gh_get` à la place).
+
+### 6. Logging — règle impérative
+
+Toujours importer le logger partagé :
+```python
+from agents.log import get_logger
+logger = get_logger("nom_du_module")
+```
+
+Ne jamais utiliser `print()` dans `agents/` pour des erreurs ou warnings silencieux.
+Utiliser `logger.debug()` pour les détails de parsing, `logger.warning()` pour les échecs.
+Les logs vont dans `tempfile.gettempdir()/scraper.log` (DEBUG) et console (INFO).
+
+### 7. Validation schema sur les outputs LLM
+
+Tout output LLM parsé en JSON DOIT passer par un modèle Pydantic avant utilisation.
+Modèle existant : `CompanyResult` dans `agents/agent1_discovery.py`.
+
+Principe :
+- Items invalides = filtrés + loggés (`logger.debug`), jamais raising
+- `model_dump()` pour convertir en dict standard avant de passer au reste du pipeline
+- Validator `mode="before"` pour normaliser les strings vides/null du LLM
 
 ---
 

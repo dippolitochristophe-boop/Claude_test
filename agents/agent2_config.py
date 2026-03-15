@@ -33,6 +33,9 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 from agents.loop import run_agent
 from agents.tools import TOOLS, web_search, web_fetch
 from agents.memory import build_prompt_section, add_success, add_failure, get_success
+from agents.log import get_logger
+
+logger = get_logger("agent2")
 
 # ── System prompt ──────────────────────────────────────────────────────────────
 # C'est ici que tout se joue. Le prompt doit être prescriptif, non ambigu,
@@ -255,6 +258,7 @@ def generate_config(company_name: str, domain: str = None, progress_cb=None) -> 
                              url, url, progress_cb)
 
     # ── Step 3 : Fallback linkedin ─────────────────────────────────────────────
+    logger.warning("No public ATS found for %s — falling back to linkedin", company_name)
     log(f"  🔗 {company_name} — aucun ATS public trouvé")
     result = {
         "name": company_name,
@@ -279,6 +283,7 @@ def _finalize(company_name, ats_type, config, confidence, winning_query, url_fou
         "notes": url_found,
     }
     _save_result(company_name, result)
+    logger.info("agent2 result: %s → %s (%s)", company_name, ats_type, confidence)
     if progress_cb:
         icons = {"confirmed": "✅", "probable": "🔧"}
         progress_cb(f"  {icons.get(confidence, '❓')} {company_name} → {ats_type} ({confidence})")
@@ -309,7 +314,8 @@ def _extract_json_object(text: str) -> dict:
     for m in reversed(matches):
         try:
             return json.loads(m.group(0))
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
+            logger.debug("JSON object parse failed: %s", e)
             continue
 
     return None

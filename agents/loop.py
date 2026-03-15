@@ -5,6 +5,9 @@ Partagée par Agent 1, Agent 2 et (si besoin) Agent 3.
 
 import anthropic
 from agents.tools import execute_tool
+from agents.log import get_logger
+
+logger = get_logger("loop")
 
 MODEL = "claude-haiku-4-5-20251001"
 
@@ -81,6 +84,7 @@ def run_agent(
 
         else:
             # stop_reason inattendu (max_tokens...) — retourner le texte accumulé si présent
+            logger.warning("stop_reason=%s at turn=%d", response.stop_reason, turn)
             if progress_cb:
                 progress_cb(f"  [warn] stop_reason={response.stop_reason}, turn={turn}")
             partial = "".join(

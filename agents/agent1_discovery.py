@@ -14,6 +14,9 @@ import re
 import sys
 import os
 import tempfile
+from typing import Optional
+
+from pydantic import BaseModel, field_validator
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -23,6 +26,32 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from agents.loop import run_agent
 from agents.tools import SEARCH_ONLY_TOOLS
+from agents.log import get_logger
+
+logger = get_logger("agent1")
+
+
+class CompanyResult(BaseModel):
+    name: str
+    domain: Optional[str] = None
+    hq: Optional[str] = None
+    sector: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def name_not_empty(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("name must be non-empty")
+        return v
+
+    @field_validator("domain", "hq", "sector", mode="before")
+    @classmethod
+    def empty_string_to_none(cls, v):
+        """LLM sometimes outputs empty string instead of null."""
+        if v == "" or v == "null":
+            return None
+        return v
 
 # ── Entreprises déjà couvertes par S1 — exclure pour éviter les doublons ───────
 
@@ -110,7 +139,11 @@ Search the web thoroughly, then return a JSON array of companies.\
         progress_cb=progress_cb,
     )
 
+    if result_text == "__MAX_TURNS_REACHED__":
+        logger.warning("Agent 1 hit max_turns limit — result may be incomplete")
+
     companies = _deduplicate(_extract_json_list(result_text))
+    logger.info("Agent 1 done — %d companies after dedup", len(companies))
 
     if progress_cb:
         progress_cb(f"Agent 1 done — {len(companies)} companies found")
@@ -137,24 +170,44 @@ def _deduplicate(companies: list) -> list:
 
 
 def _extract_json_list(text: str) -> list:
-    """Extrait une liste JSON depuis le texte de réponse de l'agent."""
+    """Extrait une liste JSON depuis le texte de réponse de l'agent, avec validation Pydantic."""
+    raw_list = None
+
     # Markdown code block
     match = re.search(r"```(?:json)?\s*(\[[\s\S]+?\])\s*```", text)
     if match:
         try:
-            return json.loads(match.group(1))
-        except json.JSONDecodeError:
-            pass
+            raw_list = json.loads(match.group(1))
+        except json.JSONDecodeError as e:
+            logger.debug("JSON parse failed in markdown block: %s", e)
 
     # JSON brut dans le texte
-    match = re.search(r"\[[\s\S]+\]", text)
-    if match:
-        try:
-            return json.loads(match.group(0))
-        except json.JSONDecodeError:
-            pass
+    if raw_list is None:
+        match = re.search(r"\[[\s\S]+\]", text)
+        if match:
+            try:
+                raw_list = json.loads(match.group(0))
+            except json.JSONDecodeError as e:
+                logger.debug("JSON parse failed in raw match: %s", e)
 
-    return []
+    if raw_list is None:
+        logger.warning("_extract_json_list: no valid JSON list found in agent output")
+        return []
+
+    validated = []
+    for item in raw_list:
+        if not isinstance(item, dict):
+            logger.debug("Skipping non-dict item: %r", item)
+            continue
+        try:
+            company = CompanyResult.model_validate(item)
+            validated.append(company.model_dump())
+        except Exception as e:
+            logger.debug("Skipping invalid company item %r: %s", item.get("name", "?"), e)
+
+    logger.debug("_extract_json_list: %d/%d items passed validation",
+                 len(validated), len(raw_list))
+    return validated
 
 
 # ── Test direct ────────────────────────────────────────────────────────────────

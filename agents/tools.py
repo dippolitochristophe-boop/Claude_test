@@ -11,6 +11,7 @@ import re
 import requests
 import urllib3
 from bs4 import BeautifulSoup
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -53,18 +54,31 @@ def web_search(query: str, max_results: int = 5) -> str:
         return f"Search error: {e}"
 
 
+@retry(
+    retry=retry_if_exception_type((
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,
+        requests.exceptions.ChunkedEncodingError,
+    )),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    reraise=True,
+)
+def _do_request(method: str, url: str, body: dict, timeout: int) -> requests.Response:
+    if method == "POST":
+        h = {**HEADERS, "Content-Type": "application/json"}
+        return requests.post(url, json=body, headers=h, timeout=timeout, verify=False)
+    return requests.get(url, headers=HEADERS, timeout=timeout, verify=False,
+                        allow_redirects=True)
+
+
 def web_fetch(url: str, method: str = "GET", body: dict = None, timeout: int = 12) -> str:
     """
     Fetch une URL. Retourne HTTP status + contenu (tronqué à 4000 chars).
     Supporte GET et POST avec body JSON (pour les APIs Workday, SmartRecruiters...).
     """
     try:
-        if method == "POST":
-            h = {**HEADERS, "Content-Type": "application/json"}
-            r = requests.post(url, json=body, headers=h, timeout=timeout, verify=False)
-        else:
-            r = requests.get(url, headers=HEADERS, timeout=timeout, verify=False,
-                             allow_redirects=True)
+        r = _do_request(method, url, body, timeout)
 
         content_type = r.headers.get("Content-Type", "")
         if "json" in content_type:

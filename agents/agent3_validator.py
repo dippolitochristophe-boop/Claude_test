@@ -21,6 +21,7 @@ import os
 import sys
 import requests
 import urllib3
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -30,12 +31,26 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from job_scrapper import HEADERS, is_relevant_title, configure as configure_scraper
+from agents.log import get_logger
+
+logger = get_logger("agent3")
 
 try:
     import anthropic
     ANTHROPIC_AVAILABLE = True
 except ImportError:
     ANTHROPIC_AVAILABLE = False
+
+_HTTP_RETRY = dict(
+    retry=retry_if_exception_type((
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,
+        requests.exceptions.ChunkedEncodingError,
+    )),
+    wait=wait_exponential(multiplier=1, min=2, max=10),
+    stop=stop_after_attempt(3),
+    reraise=True,
+)
 
 TIMEOUT = 15
 MODEL = "claude-haiku-4-5-20251001"
@@ -89,12 +104,14 @@ def validate(agent2_result: dict, profile: dict = None, progress_cb=None) -> dic
 
     except Exception as e:
         error_msg = f"{type(e).__name__}: {e}"
+        logger.warning("agent3 validation failed for %s: %s", name, error_msg)
         diagnosis = _diagnose(name, config, error_msg) if ANTHROPIC_AVAILABLE else error_msg
         return _result(name, "broken", 0, 0, None, diagnosis)
 
     raw_count = len(raw_jobs)
 
     if raw_count == 0:
+        logger.warning("agent3: 0 jobs returned for %s (%s)", name, ats_type)
         diagnosis = _diagnose(name, config, "0 jobs returned") if ANTHROPIC_AVAILABLE else "0 jobs — check config"
         return _result(name, "broken", 0, 0, None, diagnosis)
 
@@ -122,6 +139,7 @@ def validate(agent2_result: dict, profile: dict = None, progress_cb=None) -> dic
 
 # ── Validateurs par ATS ────────────────────────────────────────────────────────
 
+@retry(**_HTTP_RETRY)
 def _validate_workday(config: dict) -> list:
     """Appel API Workday — retourne les jobs bruts."""
     url = (
@@ -141,6 +159,7 @@ def _validate_workday(config: dict) -> list:
     ]
 
 
+@retry(**_HTTP_RETRY)
 def _validate_smartrecruiters(config: dict) -> list:
     url = f"https://api.smartrecruiters.com/v1/companies/{config['sr_id']}/postings?limit=20"
     r = requests.get(url, headers=HEADERS, timeout=TIMEOUT, verify=False)
@@ -152,6 +171,12 @@ def _validate_smartrecruiters(config: dict) -> list:
     ]
 
 
+@retry(**_HTTP_RETRY)
+def _gh_get(url: str) -> requests.Response:
+    """Single GET with retry — used by _validate_greenhouse to preserve 404 fallback logic."""
+    return requests.get(url, headers=HEADERS, timeout=TIMEOUT, verify=False)
+
+
 def _validate_greenhouse(config: dict) -> list:
     # ?content=true → includes full job description HTML + departments + offices
     region = config.get("region", "us")
@@ -159,11 +184,11 @@ def _validate_greenhouse(config: dict) -> list:
         url = f"https://boards-api.eu.greenhouse.io/v1/boards/{config['board_token']}/jobs?content=true"
     else:
         url = f"https://boards-api.greenhouse.io/v1/boards/{config['board_token']}/jobs?content=true"
-    r = requests.get(url, headers=HEADERS, timeout=TIMEOUT, verify=False)
+    r = _gh_get(url)
     if r.status_code == 404 and region == "eu":
         # Fallback US si EU 404
         url = f"https://boards-api.greenhouse.io/v1/boards/{config['board_token']}/jobs?content=true"
-        r = requests.get(url, headers=HEADERS, timeout=TIMEOUT, verify=False)
+        r = _gh_get(url)
     r.raise_for_status()
     data = r.json()
     return [
@@ -225,6 +250,7 @@ def _validate_taleo(config: dict) -> list:
     ]
 
 
+@retry(**_HTTP_RETRY)
 def _validate_lever(config: dict) -> list:
     """Lever ATS — API publique simple."""
     company = config.get("lever_id") or config.get("name", "").lower().replace(" ", "")

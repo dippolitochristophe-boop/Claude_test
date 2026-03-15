@@ -232,4 +232,4 @@ if __name__ == "__main__":
 
     result = run_pipeline(profile, target_companies=target)
     print(f"\nValidated configs: {len(result['validated_configs'])}")
-    print(f"Results saved to: /tmp/pipeline_result.json")
+    print(f"Results saved to: {os.path.join(tempfile.gettempdir(), 'pipeline_result.json')}")
