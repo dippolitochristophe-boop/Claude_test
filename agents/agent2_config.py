@@ -71,9 +71,7 @@ If a–e all return 0 results:
    → "JSON-LD JobPostings found:" line = structured data for Google indexing
 
 If web_fetch also finds nothing:
-   → ats_type="linkedin" — construct URL from company name (lowercase, spaces→hyphens)
-     e.g. "Hartree Partners" → {"linkedin_url":"https://www.linkedin.com/company/hartree-partners/jobs/"}
-   → No STEP 3 needed (no scrapable API endpoint)
+   → Return ats_type="unknown" — Python will handle the LinkedIn fallback automatically
 
 ## STEP 2 — Extract exact parameters
 
@@ -165,7 +163,7 @@ End your response with the JSON object only.\
         system=SYSTEM + build_prompt_section(),
         user_message=user_msg,
         tools=TOOLS,
-        max_turns=6,
+        max_turns=7,
         max_tokens=800,
         progress_cb=progress_cb,
     )
@@ -179,6 +177,18 @@ End your response with the JSON object only.\
             "confidence": "unknown",
             "notes": f"Failed to parse agent output. Raw: {result_text[:300]}",
         }
+
+    # Fallback Python : si ATS toujours inconnu → construire URL LinkedIn depuis le nom
+    # Plus fiable que de demander au LLM (évite de brûler un turn supplémentaire)
+    if result.get("ats_type") == "unknown":
+        slug = re.sub(r"[^a-z0-9]+", "-", company_name.lower()).strip("-")
+        result["ats_type"] = "linkedin"
+        result["config"] = {
+            "name": company_name,
+            "linkedin_url": f"https://www.linkedin.com/company/{slug}/jobs/",
+        }
+        result["confidence"] = "probable"
+        result["notes"] = "No public ATS found — LinkedIn URL constructed from company name (verify slug)"
 
     # Sauvegarder par entreprise
     safe_name = re.sub(r"[^a-z0-9]", "_", company_name.lower())
