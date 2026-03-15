@@ -68,11 +68,18 @@ Format: [{"name": "...", "domain": "...", "hq": "...", "sector": "..."}, ...]
 
 # ── Main function ──────────────────────────────────────────────────────────────
 
-def run_discovery(profile: dict, progress_cb=None) -> list:
+def run_discovery(profile: dict, exclude_list: list = None, progress_cb=None) -> list:
     """
     Retourne une liste de dicts {name, domain, hq, sector}.
+    exclude_list : liste de noms à exclure (None = aucune exclusion, mode S2 full)
     """
     max_companies = profile.get("max_companies", 40)
+    actual_exclude = exclude_list if exclude_list is not None else []
+
+    exclude_section = (
+        f"\n**Already covered — exclude these**:\n{', '.join(actual_exclude)}\n"
+        if actual_exclude else ""
+    )
 
     user_msg = f"""\
 Find companies hiring profiles like this:
@@ -81,10 +88,7 @@ Find companies hiring profiles like this:
 **Sectors**: {", ".join(profile.get("sectors", ["energy trading", "power", "commodities"]))}
 **Target locations**: {", ".join(profile.get("locations", ["London", "Geneva", "Amsterdam"]))}
 **Max companies to return**: {max_companies}
-
-**Already covered — exclude these**:
-{", ".join(EXISTING_S1)}
-
+{exclude_section}
 Search the web thoroughly, then return a JSON array of companies.\
 """
 

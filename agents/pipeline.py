@@ -1,17 +1,10 @@
 """
 Pipeline — Orchestrateur Agent 1 → Agent 2 → Agent 3
 
-Flux complet :
-  1. Agent 1 découvre les entreprises pertinentes pour le profil
-  2. Agent 2 génère les configs ATS (2 en parallèle max)
-  3. Agent 3 valide chaque config
-  4. Lance le scraper S1 avec les configs validées + les configs hardcodées
-
 Usage :
-    python agents/pipeline.py                     # profil de test
-    python agents/pipeline.py --profile-file profile.json
-    python agents/pipeline.py --agent2-only Axpo  # tester Agent 2 seul
-    python agents/pipeline.py --validate-s1       # valider toutes les configs S1 existantes
+    python agents/pipeline.py                                        # pipeline complet
+    python agents/pipeline.py --profile-file profile.json           # profil custom
+    python agents/pipeline.py --companies "Trafigura,Shell,Gunvor"  # bypass Agent 1
 """
 
 import argparse
@@ -33,9 +26,10 @@ from profiles import load_profile, save_profile
 
 # ── Orchestrateur principal ────────────────────────────────────────────────────
 
-def run_pipeline(profile: dict, progress_cb=None) -> dict:
+def run_pipeline(profile: dict, target_companies: list = None, progress_cb=None) -> dict:
     """
     Exécute le pipeline complet Agent 1 → 2 → 3.
+    target_companies : liste de noms → bypass Agent 1
     Retourne {validated_configs, broken, stats}.
     """
     log = progress_cb or print
@@ -45,9 +39,13 @@ def run_pipeline(profile: dict, progress_cb=None) -> dict:
     log("🚀 Pipeline démarré")
     log("═" * 60)
 
-    # ── ÉTAPE 1 : Discovery ──────────────────────────────────────────────────
-    log("\n📍 ÉTAPE 1 — Découverte des entreprises")
-    companies = run_discovery(profile, progress_cb=log)
+    # ── ÉTAPE 1 : Discovery (skippée si target_companies fourni) ─────────────
+    if target_companies:
+        companies = [{"name": n.strip(), "domain": None} for n in target_companies]
+        log(f"\n📍 Mode ciblé — {len(companies)} entreprises : {[c['name'] for c in companies]}")
+    else:
+        log("\n📍 ÉTAPE 1 — Découverte des entreprises")
+        companies = run_discovery(profile, exclude_list=None, progress_cb=log)
 
     if not companies:
         log("❌ Agent 1 n'a trouvé aucune entreprise — pipeline arrêté")
@@ -212,36 +210,15 @@ def validate_s1_configs(progress_cb=None) -> dict:
 # ── CLI ────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Job scraper pipeline")
+    parser = argparse.ArgumentParser(description="S2 pipeline — Agent 1 → Agent 2 → Agent 3")
     parser.add_argument("--profile-file", default=None, help="JSON profile file")
-    parser.add_argument("--agent2-only", default=None, metavar="COMPANY",
-                        help="Run Agent 2 only on a specific company")
-    parser.add_argument("--validate-s1", action="store_true",
-                        help="Validate all existing S1 configs (healthcheck)")
+    parser.add_argument("--companies", default=None, metavar="\"Co1,Co2,Co3\"",
+                        help="Bypass Agent 1 — tester directement ces entreprises")
     args = parser.parse_args()
 
-    if args.validate_s1:
-        validate_s1_configs()
+    profile = load_profile(args.profile_file) if args.profile_file else load_profile()
+    target = [c.strip() for c in args.companies.split(",")] if args.companies else None
 
-    elif args.agent2_only:
-        result = generate_config(args.agent2_only, progress_cb=print)
-        print("\n=== RESULT ===")
-        print(json.dumps(result, indent=2))
-
-        # Lancer Agent 3 directement si config trouvée
-        if result.get("confidence") not in ("unknown", "invalid"):
-            print("\n=== VALIDATION ===")
-            v = validate(result, progress_cb=print)
-            print(json.dumps(v, indent=2))
-
-    else:
-        # Pipeline complet
-        if args.profile_file:
-            profile = load_profile(args.profile_file)
-        else:
-            # Charge profile.json (cwd) ou retourne le DEFAULT_PROFILE
-            profile = load_profile()
-
-        result = run_pipeline(profile)
-        print(f"\nValidated configs: {len(result['validated_configs'])}")
-        print(f"Results saved to: /tmp/pipeline_result.json")
+    result = run_pipeline(profile, target_companies=target)
+    print(f"\nValidated configs: {len(result['validated_configs'])}")
+    print(f"Results saved to: /tmp/pipeline_result.json")
