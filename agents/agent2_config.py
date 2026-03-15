@@ -45,7 +45,9 @@ Mission: find the EXACT config to scrape job postings from a company's careers p
 ## CRITICAL RULES
 - ONE tool call per turn.
 - STRICTLY execute steps a→e in alphabetical order. NO other searches, NO deviations.
-- **AS SOON AS one step returns a hit → STOP all searches. Go directly to STEP 2 then STEP 3. Output JSON.**
+- **HIT on any step → STOP immediately. STEP 2 → STEP 3 → output JSON. No more searches.**
+- **0 results on any step → move to next step immediately. NEVER retry the same query.**
+- Once you have the ATS URL confirmed in STEP 3 → output JSON immediately, no extra fetches.
 - Every extra search costs money. Do not search past the first hit.
 
 ## STEP 1 — Find exact ATS URL (execute a→e in strict order, one per turn)
