@@ -32,7 +32,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from agents.loop import run_agent
 from agents.tools import TOOLS, web_search, web_fetch
-from agents.memory import add_success, add_failure, get_success
+from agents.memory import add_success, add_failure, get_success, build_prompt_section
 from agents.log import get_logger
 
 logger = get_logger("agent2")
@@ -184,7 +184,73 @@ _CAREERS_URL_TEMPLATES = [
     "https://careers.{slug}.com",
     "https://www.{slug}.com/careers",
     "https://{slug}.com/careers",
+    "https://www.{slug}.com/career",
+    "https://www.{slug}.com/jobs",
 ]
+
+
+# ── LLM fallback — utilisé uniquement quand Python échoue complètement ─────────
+
+_SYSTEM_FALLBACK = """\
+You are finding the careers page and ATS for a company.
+Max 2 tool calls total. Output JSON immediately after finding a careers URL.
+
+Steps:
+1. web_search("{company} careers jobs") → find the real careers URL
+2. web_fetch(that URL) → check "ATS URLS FOUND:" line in response
+
+Output JSON only, no prose:
+{"name":"X","ats_type":"workday|smartrecruiters|greenhouse|lever|html|unknown",
+ "config":{...},"confidence":"probable","winning_query":"...","notes":"URL found"}
+
+Config shapes:
+- Workday: {"name":"X","tenant":"x","site":"XSite","wd":"wd3"}
+- SmartRecruiters: {"name":"X","sr_id":"CompanyId"}
+- Greenhouse: {"name":"X","board_token":"token","region":"eu"}
+- HTML (custom portal): {"name":"X","type":"html","pages":["https://..."],"job_pattern":"/job"}
+- unknown: {"name":"X"}
+
+AS SOON AS you find a careers URL with jobs → output JSON. No extra searches.
+Every extra search costs money.
+"""
+
+
+def _llm_fallback(company_name: str, domain: str | None, progress_cb=None) -> dict | None:
+    """
+    Fallback LLM (Haiku) quand Python n'a pas trouvé l'ATS.
+    Max 3 turns, max_tokens=800. Retourne un dict config ou None si échec.
+    """
+    def log(msg):
+        if progress_cb:
+            progress_cb(msg)
+
+    log(f"  [LLM fallback] searching for {company_name} careers...")
+
+    memory_ctx = build_prompt_section()
+    system = _SYSTEM_FALLBACK.replace("{company}", company_name)
+    if memory_ctx:
+        system += f"\n\n## Known ATS patterns from past runs\n{memory_ctx}"
+
+    user_msg = f'Find the careers page and ATS for: "{company_name}"'
+    if domain:
+        user_msg += f" (domain: {domain})"
+
+    try:
+        raw = run_agent(
+            system=system,
+            user_message=user_msg,
+            tools=TOOLS,
+            max_turns=3,
+            max_tokens=800,
+            progress_cb=progress_cb,
+        )
+        result = _extract_json_object(raw)
+        if result and result.get("ats_type") not in (None, "unknown"):
+            return result
+    except Exception as e:
+        logger.warning("LLM fallback failed for %s: %s", company_name, e)
+
+    return None
 
 
 # ── Main function ──────────────────────────────────────────────────────────────
@@ -257,7 +323,16 @@ def generate_config(company_name: str, domain: str = None, progress_cb=None) -> 
             return _finalize(company_name, "html", html_config, "probable",
                              url, url, progress_cb)
 
-    # ── Step 3 : Fallback linkedin ─────────────────────────────────────────────
+    # ── Step 3 : LLM fallback (Haiku, max 3 turns) ────────────────────────────
+    llm_result = _llm_fallback(company_name, domain, progress_cb)
+    if llm_result:
+        ats_type = llm_result.get("ats_type", "html")
+        config = llm_result.get("config", {"name": company_name})
+        return _finalize(company_name, ats_type, config, "probable",
+                         llm_result.get("winning_query", ""),
+                         llm_result.get("notes", "via LLM fallback"), progress_cb)
+
+    # ── Step 4 : Fallback linkedin ─────────────────────────────────────────────
     logger.warning("No public ATS found for %s — falling back to linkedin", company_name)
     log(f"  🔗 {company_name} — aucun ATS public trouvé")
     result = {
