@@ -11,6 +11,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 import time
 import subprocess
 import threading
@@ -119,7 +120,7 @@ def run_pipeline(profile: dict, target_companies: list = None, progress_cb=None)
     log("═" * 60)
 
     output = {"validated_configs": validated_configs, "broken": broken, "stats": stats}
-    with open("/tmp/pipeline_result.json", "w") as f:
+    with open(os.path.join(tempfile.gettempdir(), "pipeline_result.json"), "w") as f:
         json.dump(output, f, indent=2, ensure_ascii=False)
 
     return output
@@ -201,7 +202,7 @@ def validate_s1_configs(progress_cb=None) -> dict:
     log(f"  ✅ {ok} OK  |  ⚠️  {filt} FILTER  |  ❌ {broken} BROKEN  |  {len(results)} total")
     log(f"{'═'*60}")
 
-    with open("/tmp/s1_healthcheck.json", "w") as f:
+    with open(os.path.join(tempfile.gettempdir(), "s1_healthcheck.json"), "w") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
     return {"results": results, "ok": ok, "filter": filt, "broken": broken}

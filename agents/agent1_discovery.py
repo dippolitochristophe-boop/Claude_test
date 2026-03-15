@@ -13,6 +13,7 @@ import json
 import re
 import sys
 import os
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -112,7 +113,7 @@ Search the web thoroughly, then return a JSON array of companies.\
         progress_cb(f"Agent 1 done — {len(companies)} companies found")
 
     # Sauvegarder
-    with open("/tmp/agent1_companies.json", "w") as f:
+    with open(os.path.join(tempfile.gettempdir(), "agent1_companies.json"), "w") as f:
         json.dump(companies, f, indent=2, ensure_ascii=False)
 
     return companies

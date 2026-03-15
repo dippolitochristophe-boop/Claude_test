@@ -22,6 +22,7 @@ import json
 import re
 import sys
 import os
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -165,7 +166,7 @@ End your response with the JSON object only.\
 
     # Sauvegarder par entreprise
     safe_name = re.sub(r"[^a-z0-9]", "_", company_name.lower())
-    path = f"/tmp/agent2_{safe_name}.json"
+    path = os.path.join(tempfile.gettempdir(), f"agent2_{safe_name}.json")
     with open(path, "w") as f:
         json.dump(result, f, indent=2, ensure_ascii=False)
 
