@@ -61,7 +61,13 @@ d) web_search("{company} site:jobs.lever.co")
    → Hit: lever_id = slug after / → STEP 2
 
 If a–d all return 0 results:
-   web_fetch("https://careers.{company}.com") — check "ATS URLS FOUND:" line in output
+   web_fetch("https://careers.{company}.com") or "https://{company}.com/careers"
+   → Check "ATS URLS FOUND:" line — tool pre-scans raw HTML for:
+     - Workday: "*.wd3.myworkdayjobs.com/..." in redirect/iframe
+     - Greenhouse: "Grnhse.Settings.boardURI" or "embed/job_board/js?for=TOKEN" in script tags
+     - SmartRecruiters: "smartrecruiters.com/..." in script src or links
+     - Lever/Taleo/SuccessFactors: domain patterns
+   No JavaScript execution needed — all these signals are in static HTML
 
 ## STEP 2 — Extract exact parameters
 

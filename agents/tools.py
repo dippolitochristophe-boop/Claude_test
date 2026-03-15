@@ -74,12 +74,25 @@ def web_fetch(url: str, method: str = "GET", body: dict = None, timeout: int = 1
             except Exception:
                 text = r.text
         else:
-            # Scan raw HTML for ATS URLs before BeautifulSoup strips them
+            # Scan raw HTML for ATS signals before BeautifulSoup strips them.
+            # Covers: URL patterns in href/src/redirects + JS embed variables.
             _ATS_PATTERNS = [
+                # Workday — URL redirect or iframe src
                 r'[\w-]+\.wd\d+\.myworkdayjobs\.com/[\w/%-]+',
+                # SmartRecruiters — job board links or widget script src
                 r'(?:jobs|careers)\.smartrecruiters\.com/[\w-]+',
-                r'boards(?:-api)?(?:\.eu)?\.greenhouse\.io/v?\d*/?boards/[\w-]+',
+                # Greenhouse — embed script "?for=token" or boardURI
+                r'boards\.greenhouse\.io/embed/job_board/js\?for=[\w-]+',
+                r'boards(?:-api)?(?:\.eu)?\.greenhouse\.io/[\w/v-]+',
+                r'job-boards(?:\.eu)?\.greenhouse\.io/[\w-]+',
+                # Greenhouse JS object: Grnhse.Settings.boardURI
+                r'boardURI["\s:]+["\']https?://[^"\']*greenhouse\.io/[\w-]+',
+                # Lever
                 r'jobs\.lever\.co/[\w-]+',
+                # Taleo
+                r'[\w-]+\.taleo\.net',
+                # SAP SuccessFactors
+                r'[\w-]+\.successfactors\.(?:com|eu)/careers',
             ]
             ats_hits = list({m for pat in _ATS_PATTERNS for m in re.findall(pat, r.text)})
             soup = BeautifulSoup(r.text, "html.parser")
