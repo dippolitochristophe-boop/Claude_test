@@ -14,7 +14,7 @@ Import `tempfile` requis.
 ### 3. Coût tokens — limites à ne pas dépasser
 | Paramètre | Max autorisé | Raison |
 |-----------|-------------|--------|
-| `max_turns` | 7 | Agent 2 : 5 searches + 1 web_fetch + 1 output. Au-delà, coût explose. |
+| `max_turns` | 6 | Agent 1 uniquement (LLM Discovery). Agent 2/3 = Python pur, 0 turn LLM. |
 | `max_tokens` | 800 | Suffisant pour JSON + raisonnement court |
 | `web_search` max_results | 5 | 10 résultats = 2× les tokens pour rien |
 | tool result | 2000 chars | Tronquer systématiquement dans `tools.py` |
@@ -51,6 +51,74 @@ Le LLM a tendance à sur-expliquer si on ne le contraint pas, ce qui consomme de
 #### Ne jamais demander au LLM ce que Python peut faire
 Si une opération est déterministe (construire une URL, normaliser un nom, déduplication), la faire en Python post-processing — pas dans un turn LLM supplémentaire.
 Exemple : LinkedIn URL fallback → Python, pas agent.
+
+---
+
+## Architecture Python-first — principe fondamental
+
+**L'agent LLM est le dernier recours, pas le premier réflexe.**
+
+### Hiérarchie d'exécution (du moins cher au plus cher)
+
+| Niveau | Coût tokens | Quand l'utiliser |
+|--------|-------------|-----------------|
+| 1. Cache mémoire (`memory.get_success()`) | 0 | Toujours en premier |
+| 2. Python déterministe (regex, HTTP, parsing) | 0 | Si la réponse est structurée |
+| 3. LLM output contraint (JSON only, prompt court) | maîtrisé | Extraction NLP simple |
+| 4. LLM libre (raisonnement, diagnostic) | élevé | Uniquement si 1–3 impossibles |
+
+### Règle : ne jamais utiliser un LLM pour ce que Python peut faire
+
+| Tâche | ❌ Mauvais | ✅ Bon |
+|-------|-----------|--------|
+| Extraire tenant/wd/site depuis une URL | LLM turn | `re.search(pattern, url)` |
+| Dédupliquer une liste de boîtes | LLM turn | `set()` + normalize |
+| Construire une URL ATS | LLM turn | f-string Python |
+| Tester si une API retourne ≥1 résultat | LLM turn | `requests.get()` + `len()` |
+| Fallback URL connu | LLM turn | constante Python |
+
+### Quand utiliser un LLM
+
+✅ **Oui** :
+- Extraire des noms de sociétés depuis des snippets web non structurés (Agent 1)
+- Diagnostiquer pourquoi une config a échoué en 2 phrases (Agent 3 — Haiku)
+- Comprendre le HTML d'une page inconnue pour en extraire le `job_pattern`
+
+❌ **Non** :
+- URL pattern matching → regex Python
+- Validation HTTP endpoint → `requests` direct
+- Déduplication de listes → Python `set`
+- Construction de configs ATS → Python dict depuis paramètres extraits par regex
+
+### Pattern canonique : orchestrateur Python + agent LLM en fallback
+
+```python
+# ✅ BON — Python orchestre, LLM uniquement si Python échoue
+for pattern in ATS_PATTERNS:
+    result = web_search(pattern.query)         # HTTP, pas LLM
+    m = re.search(pattern.url_re, result)      # Python, pas LLM
+    if m:
+        return build_config(m)                 # Python, pas LLM
+
+# LLM en dernier recours seulement
+return run_agent(system=SYSTEM, ...)
+
+# ❌ MAUVAIS — LLM orchestre tout
+return run_agent(system="Search these 5 ATS in order a→e...")
+```
+
+### Mémoire persistante — vérifier en premier, toujours
+
+```python
+# Étape 0 — AVANT tout traitement
+cached = memory.get_success(company_name)
+if cached:
+    return cached  # 0 token, résultat immédiat
+```
+
+Coût réel Agent 2 sans cache : ~12–23k tokens/boîte (Haiku, peu fiable).
+Coût avec cache mémoire : 0 token pour les boîtes connues.
+Coût avec Python-first : ~0 token même pour les nouvelles boîtes (5 HTTP calls, 0 LLM).
 
 ---
 
@@ -166,23 +234,26 @@ Statkraft → ✅ 3 offres   → OK
 
 ---
 
-## Règles opérationnelles pour les agents
+## Règles opérationnelles pour les agents LLM
 
-### 1. Toujours borner avec `max_turns`
-```python
-Agent(max_turns=8)   # recherche: max 10 / implémentation: max 15
-```
+Ces règles s'appliquent uniquement aux agents LLM (`run_agent()`).
+Agent 2 et Agent 3 sont Python-first — ces règles ne les concernent pas.
+
+### 1. Borner avec `max_turns`
+| Agent | max_turns | Raison |
+|-------|-----------|--------|
+| Agent 1 Discovery | 6 | 4 searches Phase 1 + 2 gap filling Phase 2 |
+| LLM diagnosis (Agent 3) | 1 | Réponse courte, 1 turn suffisant |
+| Tout autre agent LLM | 6 | Limite absolue — voir table tokens ci-dessus |
 
 ### 2. Écrire les résultats au fil de l'eau
-```
-Écris le résultat dans /tmp/<task>.md dès que tu l'as trouvé.
-N'attends pas la fin — écris au fur et à mesure.
-```
+Écrire dans `os.path.join(tempfile.gettempdir(), "<task>.json")` dès qu'un résultat est disponible.
+Ne jamais attendre la fin.
 
-### 3. Paralléliser (un agent = une tâche atomique)
-- Max 2-3 entreprises par agent
-- **Max 2 agents en parallèle** (`run_in_background=True`) — au-delà, on hit les rate limits
-- Attendre la fin des agents en cours avant d'en lancer de nouveaux
+### 3. Ne pas paralléliser les agents LLM
+Max 1 agent LLM actif à la fois.
+Raison : rate limit 50k tokens/min Anthropic — 2 agents simultanés = hit garanti.
+Les agents Python (Agent 2, Agent 3) peuvent tourner séquentiellement sans limite.
 
 ### 4. Format résultats intermédiaires
 ```markdown
