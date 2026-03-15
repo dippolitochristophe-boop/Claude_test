@@ -31,7 +31,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
 
 from agents.loop import run_agent
-from agents.tools import TOOLS
+from agents.tools import TOOLS, web_search
 from agents.memory import build_prompt_section, add_success, add_failure
 
 # ── System prompt ──────────────────────────────────────────────────────────────
@@ -181,14 +181,19 @@ End your response with the JSON object only.\
     # Fallback Python : si ATS toujours inconnu → construire URL LinkedIn depuis le nom
     # Plus fiable que de demander au LLM (évite de brûler un turn supplémentaire)
     if result.get("ats_type") == "unknown":
-        keywords = company_name.replace(" ", "+")
+        # Chercher le slug exact de la page entreprise LinkedIn
+        search_result = web_search(f"site:linkedin.com/company {company_name}", max_results=3)
+        slug_match = re.search(r'linkedin\.com/company/([\w-]+)', search_result)
+        if slug_match:
+            slug = slug_match.group(1)
+            linkedin_url = f"https://www.linkedin.com/company/{slug}/jobs/"
+        else:
+            keywords = company_name.replace(" ", "+")
+            linkedin_url = f"https://www.linkedin.com/jobs/search/?keywords={keywords}"
         result["ats_type"] = "linkedin"
-        result["config"] = {
-            "name": company_name,
-            "linkedin_url": f"https://www.linkedin.com/jobs/search/?keywords={keywords}",
-        }
+        result["config"] = {"name": company_name, "linkedin_url": linkedin_url}
         result["confidence"] = "probable"
-        result["notes"] = "No public ATS found — LinkedIn search URL (always works, no slug guessing)"
+        result["notes"] = f"No public ATS found — {linkedin_url}"
 
     # Sauvegarder par entreprise
     safe_name = re.sub(r"[^a-z0-9]", "_", company_name.lower())
