@@ -89,16 +89,49 @@ def web_fetch(url: str, method: str = "GET", body: dict = None, timeout: int = 1
                 r'boardURI["\s:]+["\']https?://[^"\']*greenhouse\.io/[\w-]+',
                 # Lever
                 r'jobs\.lever\.co/[\w-]+',
+                # Ashby (modern ATS, growing)
+                r'[\w-]+\.ashbyhq\.com/[\w-]+',
                 # Taleo
                 r'[\w-]+\.taleo\.net',
                 # SAP SuccessFactors
                 r'[\w-]+\.successfactors\.(?:com|eu)/careers',
             ]
             ats_hits = list({m for pat in _ATS_PATTERNS for m in re.findall(pat, r.text)})
+
+            # JSON-LD JobPosting — structured data embedded for Google indexing.
+            # Present on most modern job pages regardless of ATS.
+            # Contains: title, hiringOrganization, jobLocation, description, datePosted.
+            jsonld_jobs = []
+            for block in re.findall(
+                r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+                r.text, re.DOTALL | re.IGNORECASE
+            ):
+                try:
+                    obj = json.loads(block)
+                    items = obj if isinstance(obj, list) else [obj]
+                    for item in items:
+                        if item.get("@type") in ("JobPosting", "jobPosting"):
+                            jsonld_jobs.append({
+                                "title": item.get("title", ""),
+                                "org": (item.get("hiringOrganization") or {}).get("name", ""),
+                                "location": str((item.get("jobLocation") or {}).get("address", "")),
+                                "date": item.get("datePosted", ""),
+                            })
+                except Exception:
+                    pass
+
             soup = BeautifulSoup(r.text, "html.parser")
             text = soup.get_text(separator="\n", strip=True)
+            prefix_parts = []
             if ats_hits:
-                text = "ATS URLS FOUND: " + " | ".join(ats_hits) + "\n\n" + text
+                prefix_parts.append("ATS URLS FOUND: " + " | ".join(ats_hits))
+            if jsonld_jobs:
+                prefix_parts.append(
+                    "JSON-LD JobPostings found: "
+                    + json.dumps(jsonld_jobs[:5], ensure_ascii=False)
+                )
+            if prefix_parts:
+                text = "\n".join(prefix_parts) + "\n\n" + text
 
         if len(text) > 4000:
             text = text[:4000] + f"\n... [truncated — total {len(text)} chars]"

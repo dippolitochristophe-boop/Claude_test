@@ -60,7 +60,10 @@ c) web_search("{company} site:boards.greenhouse.io")
 d) web_search("{company} site:jobs.lever.co")
    → Hit: lever_id = slug after / → STEP 2
 
-If a–d all return 0 results:
+e) web_search("{company} site:ashbyhq.com")
+   → Hit: lever_id-style slug → config {"type":"ashby","slug":"company-slug"}
+
+If a–e all return 0 results:
    web_fetch("https://careers.{company}.com") or "https://{company}.com/careers"
    → Check "ATS URLS FOUND:" line — tool pre-scans raw HTML for:
      - Workday: "*.wd3.myworkdayjobs.com/..." in redirect/iframe
@@ -68,6 +71,8 @@ If a–d all return 0 results:
      - SmartRecruiters: "smartrecruiters.com/..." in script src or links
      - Lever/Taleo/SuccessFactors: domain patterns
    No JavaScript execution needed — all these signals are in static HTML
+   → "JSON-LD JobPostings found:" line = structured data for Google indexing,
+     contains title/org/location even without ATS URL signal
 
 ## STEP 2 — Extract exact parameters
 

@@ -92,8 +92,16 @@ def validate(agent2_result: dict, profile: dict = None, progress_cb=None) -> dic
         diagnosis = _diagnose(name, config, "0 jobs returned") if ANTHROPIC_AVAILABLE else "0 jobs — check config"
         return _result(name, "broken", 0, 0, None, diagnosis)
 
-    # Appliquer le filtre métier du profil S1
-    filtered = [j for j in raw_jobs if is_relevant_title(j.get("title", ""))]
+    # Appliquer le filtre métier : titre + département si disponible
+    # Le département (ex: "Finance & Accounting") peut exclure des faux positifs
+    EXCLUDE_DEPARTMENTS = {"finance", "accounting", "legal", "it", "hr", "communications", "marketing"}
+    def _is_relevant(j: dict) -> bool:
+        dept = j.get("department", "").lower()
+        if dept and any(x in dept for x in EXCLUDE_DEPARTMENTS):
+            return False
+        return is_relevant_title(j.get("title", ""))
+
+    filtered = [j for j in raw_jobs if _is_relevant(j)]
     filtered_count = len(filtered)
     sample = filtered[0]["title"] if filtered else raw_jobs[0].get("title", "")
 
@@ -139,16 +147,26 @@ def _validate_smartrecruiters(config: dict) -> list:
 
 
 def _validate_greenhouse(config: dict) -> list:
+    # ?content=true → includes full job description HTML + departments + offices
     region = config.get("region", "us")
     if region == "eu":
-        url = f"https://boards-api.eu.greenhouse.io/v1/boards/{config['board_token']}/jobs"
+        url = f"https://boards-api.eu.greenhouse.io/v1/boards/{config['board_token']}/jobs?content=true"
     else:
-        url = f"https://boards.greenhouse.io/v1/boards/{config['board_token']}/jobs"
+        url = f"https://boards-api.greenhouse.io/v1/boards/{config['board_token']}/jobs?content=true"
     r = requests.get(url, headers=HEADERS, timeout=TIMEOUT, verify=False)
+    if r.status_code == 404 and region == "eu":
+        # Fallback US si EU 404
+        url = f"https://boards-api.greenhouse.io/v1/boards/{config['board_token']}/jobs?content=true"
+        r = requests.get(url, headers=HEADERS, timeout=TIMEOUT, verify=False)
     r.raise_for_status()
     data = r.json()
     return [
-        {"title": j.get("title", ""), "url": j.get("absolute_url", "")}
+        {
+            "title": j.get("title", ""),
+            "url": j.get("absolute_url", ""),
+            "department": (j.get("departments") or [{}])[0].get("name", ""),
+            "location": (j.get("location") or {}).get("name", ""),
+        }
         for j in data.get("jobs", [])
     ]
 
