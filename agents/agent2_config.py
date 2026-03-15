@@ -46,31 +46,31 @@ Mission: find the EXACT config to scrape job postings from a company's careers p
 
 ## STEP 1 — Find exact ATS URL (one search per turn, stop at first hit)
 
-a) web_search("{company} site:myworkdayjobs.com")
+a) web_search("{company} jobs site:linkedin.com")
+   → LinkedIn aggregates postings from all ATS — snippets often contain "Apply on company website"
+     URL which directly reveals the ATS (myworkdayjobs.com / smartrecruiters.com / greenhouse.io...)
+   → If snippet contains an ATS URL → extract it immediately, skip b–f, go to STEP 2
+   → If only "Easy Apply" (no external URL) → continue to b
+
+b) web_search("{company} site:myworkdayjobs.com")
    → Hit: extract tenant/wd/site DIRECTLY from the URL — NEVER guess
      e.g. "trafigura.wd3.myworkdayjobs.com/TrafiguraCareerSite"
           → tenant=trafigura  wd=wd3  site=TrafiguraCareerSite → STEP 2
 
-b) web_search("{company} site:jobs.smartrecruiters.com")
+c) web_search("{company} site:jobs.smartrecruiters.com")
    → Hit: sr_id = path segment after domain (CASE SENSITIVE) → STEP 2
 
-c) web_search("{company} site:boards.greenhouse.io")
+d) web_search("{company} site:boards.greenhouse.io")
    → Hit: board_token = slug after /boards/ → STEP 2
 
-d) web_search("{company} site:jobs.lever.co")
+e) web_search("{company} site:jobs.lever.co")
    → Hit: lever_id = slug after / → STEP 2
 
-e) web_search("{company} site:ashbyhq.com")
-   → Hit: lever_id-style slug → config {"type":"ashby","slug":"company-slug"}
+f) web_search("{company} site:ashbyhq.com")
+   → Hit: slug → config {"type":"ashby","slug":"company-slug"}
 
-If a–e all return 0 results:
-f) web_search("{company} jobs site:linkedin.com")
-   → LinkedIn shows active postings even for companies with no public careers portal
-   → Snippet often contains "Apply on company website" → the URL reveals the ATS
-   → If a specific ATS URL appears in results → web_fetch it for Step 3 validation
-   → If only LinkedIn Easy Apply (no external URL) → ats_type="unknown"
-
-Only web_fetch("https://careers.{company}.com") if step f) reveals a specific URL hint.
+If a–f all return 0 results:
+   web_fetch("https://careers.{company}.com") or "https://{company}.com/careers"
    → Check "ATS URLS FOUND:" line — tool pre-scans raw HTML for ATS patterns
    → "JSON-LD JobPostings found:" line = structured data for Google indexing
 
