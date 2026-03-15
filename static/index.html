@@ -191,8 +191,6 @@
     .save-msg.visible { opacity: 1; }
 
     /* ── Run tab ── */
-    .run-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px; }
-    @media (max-width: 600px) { .run-grid { grid-template-columns: 1fr; } }
     .run-card {
       background: white;
       border-radius: 10px;
@@ -349,36 +347,12 @@
   <!-- ══════════════ TAB: RUN ══════════════ -->
   <div id="tab-run" class="tab">
 
-    <div class="run-grid">
-
-      <div class="run-card">
-        <h3>S1 — Scraper (hardcoded companies)</h3>
-        <p>Scrapes ~30 pre-configured companies using your profile keywords.</p>
-        <div class="options">
-          <label class="toggle-opt"><input type="checkbox" id="opt-new-only"> New jobs only</label>
-          <label class="toggle-opt"><input type="checkbox" id="opt-no-html"> No HTML report</label>
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="runScraper()" id="btn-scraper">
-          ▶ Run Scraper
-        </button>
-      </div>
-
-      <div class="run-card">
-        <h3>S2 — Pipeline (agent discovery)</h3>
-        <p>Agents discover new companies from your profile, generate configs, validate, then scrape.</p>
-        <br>
-        <button class="btn btn-green btn-sm" onclick="runPipeline()" id="btn-pipeline">
-          ▶ Run Pipeline
-        </button>
-      </div>
-
-    </div>
-
     <div class="run-card" style="margin-bottom:16px">
-      <h3>Healthcheck</h3>
-      <p style="margin-bottom:12px">Validates all S1 configs — detects broken ones and diagnoses the cause.</p>
-      <button class="btn btn-secondary btn-sm" onclick="runHealthcheck()" id="btn-hc">
-        ▶ Run Healthcheck
+      <h3>Pipeline — Agent Discovery</h3>
+      <p>Agents discover companies from your profile, generate ATS configs, validate, then return matching jobs.</p>
+      <br>
+      <button class="btn btn-green btn-sm" onclick="runPipeline()" id="btn-pipeline">
+        ▶ Run Pipeline
       </button>
     </div>
 
@@ -592,23 +566,9 @@ function handleChipInput(e, type) {
 function focusInput(id) { document.getElementById(id).focus(); }
 
 // ── Run ───────────────────────────────────────────────────────────────────────
-async function runScraper() {
-  // Auto-save profile avant de lancer
-  await saveProfile();
-  const opts = {
-    new_only: document.getElementById('opt-new-only').checked,
-    no_html: document.getElementById('opt-no-html').checked,
-  };
-  await startRun('/api/run/scraper', opts, 'btn-scraper');
-}
-
 async function runPipeline() {
   await saveProfile();
   await startRun('/api/run/pipeline', {}, 'btn-pipeline');
-}
-
-async function runHealthcheck() {
-  await startRun('/api/run/healthcheck', {}, 'btn-hc');
 }
 
 async function startRun(endpoint, body, btnId) {
@@ -713,9 +673,7 @@ function clearLog() {
 }
 
 function disableButtons(disabled) {
-  ['btn-scraper', 'btn-pipeline', 'btn-hc'].forEach(id => {
-    document.getElementById(id).disabled = disabled;
-  });
+  document.getElementById('btn-pipeline').disabled = disabled;
 }
 
 // ── Reports ───────────────────────────────────────────────────────────────────
