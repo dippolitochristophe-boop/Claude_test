@@ -14,10 +14,43 @@ Import `tempfile` requis.
 ### 3. Coût tokens — limites à ne pas dépasser
 | Paramètre | Max autorisé | Raison |
 |-----------|-------------|--------|
-| `max_turns` | 6 | Au-delà, la croissance du contexte explose le coût |
+| `max_turns` | 7 | Agent 2 : 5 searches + 1 web_fetch + 1 output. Au-delà, coût explose. |
 | `max_tokens` | 800 | Suffisant pour JSON + raisonnement court |
 | `web_search` max_results | 5 | 10 résultats = 2× les tokens pour rien |
 | tool result | 2000 chars | Tronquer systématiquement dans `tools.py` |
+
+### 4. Économie de tokens dans les prompts agents — règles impératives
+
+**Principe : prompt complet ≠ prompt verbeux.** Un prompt doit être précis et prescriptif, pas long.
+
+#### Stop au premier hit
+Tout agent qui fait des recherches séquentielles DOIT avoir cette règle explicite dans son SYSTEM prompt :
+```
+AS SOON AS one step returns a hit → STOP. Output result immediately.
+Every extra search costs money.
+```
+Sans ça, le LLM continue à chercher même après avoir trouvé.
+
+#### Pas de searches génériques entre les steps
+Interdire explicitement les recherches hors-protocole :
+```
+STRICTLY execute steps a→e in order. NO generic searches. NO deviations.
+```
+Sans ça, le LLM insère des searches "de confirmation" inutiles.
+
+#### Ordre des searches : du plus probable au moins probable
+- Workday en premier (60%+ des grandes boîtes energy/trading)
+- SmartRecruiters, Greenhouse ensuite
+- Lever, Ashby en dernier (rares dans ce secteur)
+→ La majorité des boîtes sont trouvées en 1-2 turns, pas 5.
+
+#### max_tokens dans le SYSTEM prompt
+Préciser dans le SYSTEM : "Output JSON only, no prose" + "Be concise".
+Le LLM a tendance à sur-expliquer si on ne le contraint pas, ce qui consomme des tokens inutiles dans le contexte cumulé.
+
+#### Ne jamais demander au LLM ce que Python peut faire
+Si une opération est déterministe (construire une URL, normaliser un nom, déduplication), la faire en Python post-processing — pas dans un turn LLM supplémentaire.
+Exemple : LinkedIn URL fallback → Python, pas agent.
 
 ---
 
