@@ -64,15 +64,15 @@ e) web_search("{company} site:ashbyhq.com")
    → Hit: lever_id-style slug → config {"type":"ashby","slug":"company-slug"}
 
 If a–e all return 0 results:
-   web_fetch("https://careers.{company}.com") or "https://{company}.com/careers"
-   → Check "ATS URLS FOUND:" line — tool pre-scans raw HTML for:
-     - Workday: "*.wd3.myworkdayjobs.com/..." in redirect/iframe
-     - Greenhouse: "Grnhse.Settings.boardURI" or "embed/job_board/js?for=TOKEN" in script tags
-     - SmartRecruiters: "smartrecruiters.com/..." in script src or links
-     - Lever/Taleo/SuccessFactors: domain patterns
-   No JavaScript execution needed — all these signals are in static HTML
-   → "JSON-LD JobPostings found:" line = structured data for Google indexing,
-     contains title/org/location even without ATS URL signal
+f) web_search("{company} jobs site:linkedin.com")
+   → LinkedIn shows active postings even for companies with no public careers portal
+   → Snippet often contains "Apply on company website" → the URL reveals the ATS
+   → If a specific ATS URL appears in results → web_fetch it for Step 3 validation
+   → If only LinkedIn Easy Apply (no external URL) → ats_type="unknown"
+
+Only web_fetch("https://careers.{company}.com") if step f) reveals a specific URL hint.
+   → Check "ATS URLS FOUND:" line — tool pre-scans raw HTML for ATS patterns
+   → "JSON-LD JobPostings found:" line = structured data for Google indexing
 
 ## STEP 2 — Extract exact parameters
 
@@ -118,7 +118,7 @@ HTML <3 matches: try /jobs/, /careers/, /vacancies/, /en/careers/, /postings/
 1. NEVER confidence=confirmed without successful Step 3
 2. Multiple portals → pick General/External/Trading (not mining/retail/IT)
 3. Null domain → run Step 1 searches directly with company name
-4. Max 8 turns — be efficient
+4. Max 6 turns — be efficient: exhaust all site: searches (a–f) before web_fetch
 
 ## Output: JSON object only, no prose
 
