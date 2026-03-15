@@ -36,35 +36,37 @@ EXISTING_S1 = [
 # ── System prompt ──────────────────────────────────────────────────────────────
 
 SYSTEM = """\
-You are a specialized recruiter for energy/commodities/trading sectors in Europe.
-Task: find companies hiring profiles like the one described.
+You are a company discovery agent. Find companies that hire profiles like the one described.
 
-## Search strategy (in order)
-1. "{sector} trading companies {locations} jobs"
-2. "{role} hiring Europe {sector}"
-3. "commodity trading firms {locations} careers"
-4. Add a targeted search for any specific sub-sector mentioned (renewables, gas, LNG...)
+## Two-phase search strategy
 
-## Include
-- Trading houses (Vitol, Gunvor, Glencore, Mercuria, Hartree, Marex, Freepoint, Koch...)
-- Utilities with trading desks (E.ON, Enel, RWE, Vattenfall, Alpiq, Axpo, Statkraft, Fortum...)
-- Energy majors (Shell, BP, TotalEnergies, Equinor, Eni, Repsol, OMV...)
-- Prop/market-making in energy (DRW, Optiver, Flow Traders, Jane Street commodities...)
-- Commodity merchants matching the profile sector
+### Phase 1 — Broad discovery (3–4 searches, one per turn)
+1. "top [sector] companies [locations]"             → major players
+2. "[known company in sector] competitors"           → peer group (pick a company you know in this sector)
+3. "list [sector] companies wikipedia"               → curated encyclopedia list
+4. "[sector] employers [country]"                    → geographic angle
 
-## Exclude
-- Pure retail energy (no trading desk)
-- Consulting, audit, PE/VC
-- Outside target geography
-- Companies already in the EXISTING list
+Replace [sector], [locations], [country] with ACTUAL values from the profile.
+
+### Phase 2 — Gap filling (1–2 searches max)
+After Phase 1, if important niches are missing (e.g. prop trading, utilities, smaller firms),
+run 1–2 targeted searches to fill gaps.
 
 ## Rules
-- Max {max_companies} companies — quality over quantity
-- Unknown domain → null (never invent)
-- Final answer: valid JSON array only, no prose
-- **One tool call per turn. 3 searches maximum total.**
+- One tool call per turn maximum.
+- Always use max_results=5 in every web_search call.
+- Extract ALL company names mentioned in snippets — not just the first result.
+- Do not return companies in the exclusion list (if provided).
+- Respect the max_companies limit from the user message.
+- If a domain is unknown, set "domain": null — never invent one.
+- Final answer: valid JSON array only, no prose before or after it.
 
-Format: [{"name": "...", "domain": "...", "hq": "...", "sector": "..."}, ...]
+## Output format
+[{"name": "...", "domain": "...", "hq": "...", "sector": "..."}, ...]
+- name: official company name
+- domain: primary web domain (e.g. "trafigura.com") or null if unknown
+- hq: headquarters city + country (e.g. "Geneva, Switzerland") or null
+- sector: the specific sector matching this profile
 """
 
 
@@ -94,7 +96,7 @@ Find companies hiring profiles like this:
 Search the web thoroughly, then return a JSON array of companies.\
 """
 
-    system = SYSTEM.replace("{max_companies}", str(max_companies))
+    system = SYSTEM
 
     if progress_cb:
         progress_cb("Agent 1 — Discovery: searching for companies...")
@@ -103,12 +105,12 @@ Search the web thoroughly, then return a JSON array of companies.\
         system=system,
         user_message=user_msg,
         tools=SEARCH_ONLY_TOOLS,
-        max_turns=4,
+        max_turns=6,
         max_tokens=800,
         progress_cb=progress_cb,
     )
 
-    companies = _extract_json_list(result_text)
+    companies = _deduplicate(_extract_json_list(result_text))
 
     if progress_cb:
         progress_cb(f"Agent 1 done — {len(companies)} companies found")
@@ -121,6 +123,18 @@ Search the web thoroughly, then return a JSON array of companies.\
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _deduplicate(companies: list) -> list:
+    """Remove duplicate companies by normalized name (case-insensitive, stripped)."""
+    seen = set()
+    result = []
+    for c in companies:
+        key = c.get("name", "").lower().strip()
+        if key and key not in seen:
+            seen.add(key)
+            result.append(c)
+    return result
+
 
 def _extract_json_list(text: str) -> list:
     """Extrait une liste JSON depuis le texte de réponse de l'agent."""
@@ -152,7 +166,7 @@ if __name__ == "__main__":
         "locations": ["London", "Geneva", "Amsterdam", "Paris"],
         "max_companies": 20,
     }
-    companies = run_discovery(profile, progress_cb=print)
+    companies = run_discovery(profile, exclude_list=EXISTING_S1, progress_cb=print)
     print(f"\n{'─'*40}")
     print(f"Result: {len(companies)} companies")
     for c in companies:
