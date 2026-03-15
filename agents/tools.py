@@ -7,6 +7,7 @@ Dépendances :
 """
 
 import json
+import re
 import requests
 import urllib3
 from bs4 import BeautifulSoup
@@ -73,8 +74,18 @@ def web_fetch(url: str, method: str = "GET", body: dict = None, timeout: int = 1
             except Exception:
                 text = r.text
         else:
+            # Scan raw HTML for ATS URLs before BeautifulSoup strips them
+            _ATS_PATTERNS = [
+                r'[\w-]+\.wd\d+\.myworkdayjobs\.com/[\w/%-]+',
+                r'(?:jobs|careers)\.smartrecruiters\.com/[\w-]+',
+                r'boards(?:-api)?(?:\.eu)?\.greenhouse\.io/v?\d*/?boards/[\w-]+',
+                r'jobs\.lever\.co/[\w-]+',
+            ]
+            ats_hits = list({m for pat in _ATS_PATTERNS for m in re.findall(pat, r.text)})
             soup = BeautifulSoup(r.text, "html.parser")
             text = soup.get_text(separator="\n", strip=True)
+            if ats_hits:
+                text = "ATS URLS FOUND: " + " | ".join(ats_hits) + "\n\n" + text
 
         if len(text) > 4000:
             text = text[:4000] + f"\n... [truncated — total {len(text)} chars]"

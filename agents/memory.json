@@ -1,0 +1,129 @@
+{
+  "successes": [
+    {
+      "company": "Trafigura",
+      "ats_type": "workday",
+      "winning_query": "Trafigura site:myworkdayjobs.com",
+      "url_found": "trafigura.wd3.myworkdayjobs.com/TrafiguraCareerSite",
+      "config": {"name": "Trafigura", "tenant": "trafigura", "site": "TrafiguraCareerSite", "wd": "wd3"},
+      "raw_count": null,
+      "date": "2026-03-15"
+    },
+    {
+      "company": "Gunvor",
+      "ats_type": "workday",
+      "winning_query": "Gunvor site:myworkdayjobs.com",
+      "url_found": "gunvor.wd3.myworkdayjobs.com/Gunvor_Careers",
+      "config": {"name": "Gunvor", "tenant": "gunvor", "site": "Gunvor_Careers", "wd": "wd3"},
+      "raw_count": null,
+      "date": "2026-03-15"
+    },
+    {
+      "company": "Shell",
+      "ats_type": "workday",
+      "winning_query": "Shell site:myworkdayjobs.com",
+      "url_found": "shell.wd3.myworkdayjobs.com/ShellCareers",
+      "config": {"name": "Shell", "tenant": "shell", "site": "ShellCareers", "wd": "wd3"},
+      "raw_count": null,
+      "date": "2026-03-15"
+    },
+    {
+      "company": "BP",
+      "ats_type": "workday",
+      "winning_query": "BP site:myworkdayjobs.com",
+      "url_found": "bpinternational.wd3.myworkdayjobs.com/bpCareers",
+      "config": {"name": "BP", "tenant": "bpinternational", "site": "bpCareers", "wd": "wd3"},
+      "raw_count": null,
+      "date": "2026-03-15"
+    },
+    {
+      "company": "Equinor",
+      "ats_type": "workday",
+      "winning_query": "Equinor site:myworkdayjobs.com",
+      "url_found": "equinor.wd3.myworkdayjobs.com/EQNR",
+      "config": {"name": "Equinor", "tenant": "equinor", "site": "EQNR", "wd": "wd3"},
+      "raw_count": null,
+      "date": "2026-03-15"
+    },
+    {
+      "company": "EDF Trading",
+      "ats_type": "workday",
+      "winning_query": "EDF Trading site:myworkdayjobs.com",
+      "url_found": "edftrading.wd1.myworkdayjobs.com/EDFTrading",
+      "config": {"name": "EDF Trading", "tenant": "edftrading", "site": "EDFTrading", "wd": "wd1"},
+      "raw_count": null,
+      "date": "2026-03-15"
+    },
+    {
+      "company": "Centrica",
+      "ats_type": "workday",
+      "winning_query": "Centrica site:myworkdayjobs.com",
+      "url_found": "centrica.wd3.myworkdayjobs.com/Centrica",
+      "config": {"name": "Centrica", "tenant": "centrica", "site": "Centrica", "wd": "wd3"},
+      "raw_count": null,
+      "date": "2026-03-15"
+    },
+    {
+      "company": "Castleton Commodities (CCI)",
+      "ats_type": "workday",
+      "winning_query": "Castleton Commodities site:myworkdayjobs.com",
+      "url_found": "osv-cci.wd1.myworkdayjobs.com/CCICareers",
+      "config": {"name": "Castleton Commodities (CCI)", "tenant": "osv-cci", "site": "CCICareers", "wd": "wd1"},
+      "raw_count": null,
+      "date": "2026-03-15"
+    },
+    {
+      "company": "Statkraft",
+      "ats_type": "smartrecruiters",
+      "winning_query": "Statkraft site:jobs.smartrecruiters.com",
+      "url_found": "jobs.smartrecruiters.com/Statkraft1",
+      "config": {"name": "Statkraft", "sr_id": "statkraft1"},
+      "raw_count": null,
+      "date": "2026-03-15"
+    },
+    {
+      "company": "Vattenfall",
+      "ats_type": "smartrecruiters",
+      "winning_query": "Vattenfall site:jobs.smartrecruiters.com",
+      "url_found": "jobs.smartrecruiters.com/Vattenfall",
+      "config": {"name": "Vattenfall", "sr_id": "Vattenfall"},
+      "raw_count": null,
+      "date": "2026-03-15"
+    },
+    {
+      "company": "Vitol",
+      "ats_type": "smartrecruiters",
+      "winning_query": "Vitol site:jobs.smartrecruiters.com",
+      "url_found": "jobs.smartrecruiters.com/Vitol",
+      "config": {"name": "Vitol", "sr_id": "Vitol"},
+      "raw_count": null,
+      "date": "2026-03-15"
+    },
+    {
+      "company": "Glencore (London Trading)",
+      "ats_type": "greenhouse",
+      "winning_query": "Glencore site:boards.greenhouse.io",
+      "url_found": "job-boards.eu.greenhouse.io/glencoreuk",
+      "config": {"name": "Glencore (London Trading)", "board_token": "glencoreuk", "region": "eu"},
+      "raw_count": null,
+      "date": "2026-03-15"
+    },
+    {
+      "company": "Glencore (Baar HQ)",
+      "ats_type": "greenhouse",
+      "winning_query": "Glencore Baar site:boards.greenhouse.io",
+      "url_found": "job-boards.eu.greenhouse.io/tlgglencorebaar",
+      "config": {"name": "Glencore (Baar HQ)", "board_token": "tlgglencorebaar", "region": "eu"},
+      "raw_count": null,
+      "date": "2026-03-15"
+    }
+  ],
+  "failures": [
+    {
+      "company": "SEFE M&T",
+      "tried_queries": ["SEFE site:myworkdayjobs.com", "SEFE site:jobs.smartrecruiters.com"],
+      "reason": "careers.sefe.eu returns 403 — probable SAP SuccessFactors behind proxy",
+      "date": "2026-03-15"
+    }
+  ]
+}

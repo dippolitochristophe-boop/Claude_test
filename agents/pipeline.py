@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from agents.agent1_discovery import run_discovery
 from agents.agent2_config import generate_config
 from agents.agent3_validator import validate
+from agents import memory
 from profiles import load_profile, save_profile
 
 
@@ -134,12 +135,31 @@ def _process_company(company: dict, profile: dict, log) -> dict:
     # Agent 3 — Validator (avec profil pour le filtre de pertinence)
     agent3_result = validate(agent2_result, profile=profile, progress_cb=log)
 
+    status = agent3_result["status"]
+
+    # Écrire dans la mémoire pour les prochains runs
+    if status in ("ok", "filter"):
+        memory.add_success(
+            company=name,
+            ats_type=agent2_result.get("ats_type", "unknown"),
+            winning_query=agent2_result.get("winning_query", ""),
+            url_found=agent2_result.get("notes", ""),
+            config=agent2_result.get("config"),
+            raw_count=agent3_result.get("raw_count"),
+        )
+    else:
+        memory.add_failure(
+            company=name,
+            tried_queries=[agent2_result.get("winning_query", "")],
+            reason=agent3_result.get("diagnosis") or agent2_result.get("notes", ""),
+        )
+
     return {
         "name": name,
         "ats_type": agent2_result.get("ats_type"),
         "config": agent2_result.get("config"),
         "confidence": agent2_result.get("confidence"),
-        "validation_status": agent3_result["status"],
+        "validation_status": status,
         "raw_count": agent3_result["raw_count"],
         "sample_job": agent3_result.get("sample_job"),
         "diagnosis": agent3_result.get("diagnosis"),

@@ -32,6 +32,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from agents.loop import run_agent
 from agents.tools import TOOLS
+from agents.memory import build_prompt_section, add_success, add_failure
 
 # ── System prompt ──────────────────────────────────────────────────────────────
 # C'est ici que tout se joue. Le prompt doit être prescriptif, non ambigu,
@@ -43,19 +44,24 @@ Mission: find the EXACT config to scrape job postings from a company's careers p
 
 ## CRITICAL RULE: One tool call per turn maximum.
 
-## STEP 1 — Identify ATS (stop as soon as you find one)
+## STEP 1 — Find exact ATS URL (one search per turn, stop at first hit)
 
-a) web_fetch "https://{company}.com/careers" (or "https://careers.{company}.com")
-   → Scan URLs and page text for ATS patterns:
-     *.myworkdayjobs.com  → Workday  (extract tenant/wd/site from URL)
-     smartrecruiters.com  → SmartRecruiters
-     greenhouse.io        → Greenhouse
-     lever.co             → Lever
-   → If ATS found: go to STEP 2
-   → If 403 / no ATS signal: go to b)
+a) web_search("{company} site:myworkdayjobs.com")
+   → Hit: extract tenant/wd/site DIRECTLY from the URL — NEVER guess
+     e.g. "trafigura.wd3.myworkdayjobs.com/TrafiguraCareerSite"
+          → tenant=trafigura  wd=wd3  site=TrafiguraCareerSite → STEP 2
 
-b) web_search("{company} careers myworkdayjobs OR smartrecruiters OR greenhouse OR lever")
-   → Extract ATS type and exact URL from results → go to STEP 2
+b) web_search("{company} site:jobs.smartrecruiters.com")
+   → Hit: sr_id = path segment after domain (CASE SENSITIVE) → STEP 2
+
+c) web_search("{company} site:boards.greenhouse.io")
+   → Hit: board_token = slug after /boards/ → STEP 2
+
+d) web_search("{company} site:jobs.lever.co")
+   → Hit: lever_id = slug after / → STEP 2
+
+If a–d all return 0 results:
+   web_fetch("https://careers.{company}.com") — check "ATS URLS FOUND:" line in output
 
 ## STEP 2 — Extract exact parameters
 
@@ -105,7 +111,7 @@ HTML <3 matches: try /jobs/, /careers/, /vacancies/, /en/careers/, /postings/
 
 ## Output: JSON object only, no prose
 
-{"name":"Company","ats_type":"workday|smartrecruiters|greenhouse|taleo|html|lever|unknown","config":{...},"confidence":"confirmed|probable|unknown|invalid","notes":"..."}
+{"name":"Company","ats_type":"workday|smartrecruiters|greenhouse|taleo|html|lever|unknown","config":{...},"confidence":"confirmed|probable|unknown|invalid","winning_query":"the site: search that found the URL","notes":"..."}
 
 Config shapes:
 - Workday: {"name":"X","tenant":"x","site":"XCareerSite","wd":"wd3"}
@@ -143,11 +149,11 @@ End your response with the JSON object only.\
         progress_cb(f"Agent 2 — {company_name}: identifying ATS...")
 
     result_text = run_agent(
-        system=SYSTEM,
+        system=SYSTEM + build_prompt_section(),
         user_message=user_msg,
         tools=TOOLS,
         max_turns=4,
-        max_tokens=600,
+        max_tokens=800,
         progress_cb=progress_cb,
     )
 
