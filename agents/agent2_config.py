@@ -149,8 +149,8 @@ End your response with the JSON object only.\
         system=SYSTEM,
         user_message=user_msg,
         tools=TOOLS,
-        max_turns=8,
-        max_tokens=1400,
+        max_turns=6,
+        max_tokens=600,
         progress_cb=progress_cb,
     )
 

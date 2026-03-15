@@ -102,8 +102,8 @@ Search the web thoroughly, then return a JSON array of companies.\
         system=system,
         user_message=user_msg,
         tools=SEARCH_ONLY_TOOLS,
-        max_turns=10,
-        max_tokens=1500,
+        max_turns=6,
+        max_tokens=800,
         progress_cb=progress_cb,
     )
 

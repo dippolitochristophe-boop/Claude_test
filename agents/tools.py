@@ -31,7 +31,7 @@ HEADERS = {
 
 # ── Implémentations ────────────────────────────────────────────────────────────
 
-def web_search(query: str, max_results: int = 10) -> str:
+def web_search(query: str, max_results: int = 5) -> str:
     """Recherche web via DuckDuckGo. Supporte l'opérateur site:."""
     if not HAS_DDG:
         return "ERROR: duckduckgo_search not installed. Run: pip install duckduckgo-search"
@@ -42,8 +42,12 @@ def web_search(query: str, max_results: int = 10) -> str:
             return "No results found."
         lines = []
         for r in results:
-            lines.append(f"URL: {r['href']}\nTitle: {r['title']}\nSnippet: {r.get('body', '')}")
-        return "\n---\n".join(lines)
+            snippet = r.get('body', '')[:200]
+            lines.append(f"URL: {r['href']}\nTitle: {r['title']}\nSnippet: {snippet}")
+        text = "\n---\n".join(lines)
+        if len(text) > 2000:
+            text = text[:2000] + "\n... [truncated]"
+        return text
     except Exception as e:
         return f"Search error: {e}"
 

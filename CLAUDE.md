@@ -1,5 +1,26 @@
 # Claude Code — Règles de développement
 
+## Règles impératives (à respecter à chaque modification)
+
+### 1. Toujours maintenir `requirements.txt`
+Quand tu ajoutes un `import` d'une lib tierce dans n'importe quel fichier Python,
+tu DOIS ajouter la dépendance dans `requirements.txt` dans le même commit.
+Libs tierces actuelles : `requests`, `urllib3`, `beautifulsoup4`, `flask`, `playwright`, `anthropic`, `duckduckgo-search`
+
+### 2. Chemins fichiers — toujours cross-platform
+Ne jamais hardcoder `/tmp/`. Utiliser `os.path.join(tempfile.gettempdir(), ...)`.
+Import `tempfile` requis.
+
+### 3. Coût tokens — limites à ne pas dépasser
+| Paramètre | Max autorisé | Raison |
+|-----------|-------------|--------|
+| `max_turns` | 6 | Au-delà, la croissance du contexte explose le coût |
+| `max_tokens` | 800 | Suffisant pour JSON + raisonnement court |
+| `web_search` max_results | 5 | 10 résultats = 2× les tokens pour rien |
+| tool result | 2000 chars | Tronquer systématiquement dans `tools.py` |
+
+---
+
 ## Vision : 2 streams
 
 ---
