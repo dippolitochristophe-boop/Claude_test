@@ -16,9 +16,9 @@ def run_agent(
     system: str,
     user_message: str,
     tools: list,
-    max_turns: int = 10,
+    max_turns: int = 6,
     model: str = MODEL,
-    max_tokens: int = 1024,
+    max_tokens: int = 800,
     progress_cb=None,
 ) -> str:
     """

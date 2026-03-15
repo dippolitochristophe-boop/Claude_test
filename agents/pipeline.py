@@ -13,9 +13,6 @@ import os
 import sys
 import tempfile
 import time
-import subprocess
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 

@@ -9,11 +9,8 @@ Dépendances :
 import json
 import re
 import requests
-import urllib3
 from bs4 import BeautifulSoup
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 try:
     from ddgs import DDGS
@@ -67,9 +64,8 @@ def web_search(query: str, max_results: int = 5) -> str:
 def _do_request(method: str, url: str, body: dict, timeout: int) -> requests.Response:
     if method == "POST":
         h = {**HEADERS, "Content-Type": "application/json"}
-        return requests.post(url, json=body, headers=h, timeout=timeout, verify=False)
-    return requests.get(url, headers=HEADERS, timeout=timeout, verify=False,
-                        allow_redirects=True)
+        return requests.post(url, json=body, headers=h, timeout=timeout)
+    return requests.get(url, headers=HEADERS, timeout=timeout, allow_redirects=True)
 
 
 def web_fetch(url: str, method: str = "GET", body: dict = None, timeout: int = 12) -> str:

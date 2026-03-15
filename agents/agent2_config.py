@@ -32,7 +32,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 
 from agents.loop import run_agent
 from agents.tools import TOOLS, web_search, web_fetch
-from agents.memory import build_prompt_section, add_success, add_failure, get_success
+from agents.memory import add_success, add_failure, get_success
 from agents.log import get_logger
 
 logger = get_logger("agent2")

@@ -15,9 +15,10 @@ Import `tempfile` requis.
 | Paramètre | Max autorisé | Raison |
 |-----------|-------------|--------|
 | `max_turns` | 6 | Agent 1 uniquement (LLM Discovery). Agent 2/3 = Python pur, 0 turn LLM. |
-| `max_tokens` | 800 | Suffisant pour JSON + raisonnement court |
+| `max_tokens` | 800 | Suffisant pour JSON + raisonnement court. Défaut dans `loop.py` DOIT être 800 (pas 1024). |
 | `web_search` max_results | 5 | 10 résultats = 2× les tokens pour rien |
-| tool result | 2000 chars | Tronquer systématiquement dans `tools.py` |
+| `web_search` result | 2000 chars | Tronquer dans `tools.py` — suffisant pour snippets |
+| `web_fetch` result | 4000 chars | Plus long nécessaire pour détecter les patterns ATS dans le HTML |
 
 ### 4. Économie de tokens dans les prompts agents — règles impératives
 
@@ -98,6 +99,45 @@ Principe :
 - Items invalides = filtrés + loggés (`logger.debug`), jamais raising
 - `model_dump()` pour convertir en dict standard avant de passer au reste du pipeline
 - Validator `mode="before"` pour normaliser les strings vides/null du LLM
+
+### 8. Type hints — obligatoires sur tout nouveau code (Python 3.10)
+
+Toute nouvelle fonction et tout fichier modifié DOIT avoir des annotations de type.
+Syntaxe Python 3.10 — pas besoin de `from __future__ import annotations` :
+
+```python
+# ✅ Python 3.10+
+def validate(config: dict | None) -> str | None: ...
+def find_companies(names: list[str]) -> list[dict]: ...
+
+# ❌ Style pré-3.10 — ne pas utiliser
+from typing import Optional, List, Dict
+def validate(config: Optional[Dict]) -> Optional[str]: ...
+```
+
+- `X | Y` à la place de `Union[X, Y]`
+- `X | None` à la place de `Optional[X]`
+- `list[str]` / `dict[str, int]` à la place de `List[str]` / `Dict[str, int]` (minuscules)
+- Ne pas annoter rétrospectivement tout le code existant — uniquement le code que tu touches.
+
+### 9. SSL — jamais `verify=False`
+
+Interdire `requests.get(..., verify=False)`, `requests.post(..., verify=False)` et `urllib3.disable_warnings()`.
+Ces patterns désactivent la validation des certificats TLS → attaque MITM possible.
+
+Si un endpoint retourne une erreur SSL :
+- ❌ `verify=False` — masque le problème silencieusement
+- ✅ Lever une exception explicite avec l'URL et le message d'erreur → problème visible dans les logs
+
+### 10. Pas de dead code
+
+Interdire :
+- `import X` si X n'est pas utilisé dans le fichier
+- Fonctions définies mais jamais appelées
+- Classes ou constantes définies mais non référencées
+
+Règle : si tu ajoutes un import ou une fonction, elle doit être utilisée dans le même commit.
+Si une fonction devient inutile après refactor → la supprimer dans le même commit.
 
 ---
 
@@ -349,4 +389,4 @@ Les agents Python (Agent 2, Agent 3) peuvent tourner séquentiellement sans limi
 ## Environnement d'exécution
 - **Proxy** : pas de connexion directe à `*.myworkdayjobs.com` — utiliser `WebSearch`
 - **Branch** : `claude/review-job-scraper-JxWYi`
-- **Résultats de recherche** : `/tmp/ats_results.md`
+- **Résultats de recherche** : `os.path.join(tempfile.gettempdir(), "ats_results.md")`
