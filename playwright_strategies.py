@@ -434,7 +434,15 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
 
             # ── Étape 3 : scroll pour lazy-loading ───────────────────────────
             for _ in range(3):
-                pw_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                try:
+                    pw_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                except Exception:
+                    # Page navigated during scroll (redirect/SPA) — wait and continue
+                    try:
+                        pw_page.wait_for_load_state("load", timeout=8000)
+                    except Exception:
+                        pass
+                    break
                 pw_page.wait_for_timeout(600)
 
             # ── Étape 3.5 : job_pattern effectif (cache → config) ─────────────
