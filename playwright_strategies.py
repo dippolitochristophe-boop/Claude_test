@@ -18,6 +18,7 @@ Usage :
   jobs = smart_scrape_site(site_config, pw_page)
 """
 
+import json
 import re
 import sys
 import time
@@ -330,6 +331,41 @@ def _parse_api_jobs(body, company_name: str, validate_mode: bool = False) -> lis
     return jobs
 
 
+def _llm_discover_pattern(html: str, company_name: str) -> str | None:
+    """
+    Haiku analyse le HTML et retourne le job_pattern (substring href commun
+    à tous les liens d'offre). Appel one-shot, max_tokens=150.
+    Résultat persisté dans html_pattern_cache → 0 token aux runs suivants.
+    """
+    from agents.loop import run_agent
+
+    SYSTEM = (
+        "You analyze HTML from job listing pages. "
+        "Find the URL substring shared by all job listing anchor tags (the job_pattern). "
+        'Output JSON only: {"job_pattern": "/jobs/"} '
+        'If no job links visible: {"job_pattern": null}. '
+        "No prose."
+    )
+    prompt = f"Find job_pattern in this HTML from {company_name}:\n{html[:4000]}"
+    try:
+        result = run_agent(
+            system=SYSTEM,
+            user_message=prompt,
+            tools=[],
+            max_turns=1,
+            max_tokens=150,
+        )
+        m = re.search(r'\{[^}]+\}', result)
+        if m:
+            data = json.loads(m.group())
+            pattern = data.get("job_pattern")
+            if pattern and isinstance(pattern, str):
+                return pattern
+    except Exception as e:
+        print(f"     ↳ LLM pattern discovery failed: {str(e)[:80]}")
+    return None
+
+
 def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                       validate_mode: bool = False) -> tuple[list[dict], str]:
     """
@@ -401,11 +437,22 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                 pw_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 pw_page.wait_for_timeout(600)
 
+            # ── Étape 3.5 : job_pattern effectif (cache → config) ─────────────
+            # Cache check : 0 token. Surcharge job_pattern si LLM l'a déjà découvert.
+            from agents.html_pattern_cache import get as _cache_get, put as _cache_put
+            cached_pattern = _cache_get(company)
+            effective_pattern = cached_pattern or site.get("job_pattern")
+            effective_site = (
+                {**site, "job_pattern": effective_pattern}
+                if effective_pattern != site.get("job_pattern")
+                else site
+            )
+
             # ── Étape 4 : attente DOM jobs ────────────────────────────────────
-            found_sel = _wait_for_jobs_dom(pw_page, site.get("wait_for"), site.get("job_pattern"))
+            found_sel = _wait_for_jobs_dom(pw_page, site.get("wait_for"), effective_pattern)
 
             # ── Étape 5 : parse DOM ───────────────────────────────────────────
-            dom_jobs = parse_jobs_from_html(pw_page.content(), site, validate_mode=validate_mode)
+            dom_jobs = parse_jobs_from_html(pw_page.content(), effective_site, validate_mode=validate_mode)
             for j in dom_jobs:
                 j["source"] = "Playwright"
 
@@ -438,14 +485,34 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                 pw_page.remove_listener("response", on_response)
                 continue
 
-            # ── Étape 7 : dernier recours requests ───────────────────────────
-            # Debug : loggue les structures d'APIs non reconnues pour diagnostic
+            # ── Étape 7 : LLM pattern discovery ──────────────────────────────
+            # Fires uniquement si DOM=0 et API=0. Résultat mis en cache → 0 token aux runs suivants.
             if intercepted_apis:
                 print(f"     ↳ DOM=0, {len(intercepted_apis)} API(s) interceptée(s) — structures non reconnues :")
                 for api_url, body in intercepted_apis:
                     _log_unrecognized_api(api_url, body)
             else:
-                print(f"     ↳ DOM=0, aucune API JSON interceptée → requests fallback")
+                print(f"     ↳ DOM=0, aucune API JSON interceptée → LLM pattern discovery")
+
+            discovered = _llm_discover_pattern(pw_page.content(), company)
+            if discovered:
+                _cache_put(company, discovered)
+                llm_site = {**site, "job_pattern": discovered}
+                llm_jobs = parse_jobs_from_html(pw_page.content(), llm_site, validate_mode=validate_mode)
+                for j in llm_jobs:
+                    j["source"] = "Playwright+LLM"
+                    dedup = j["url"].split("?")[0].rstrip("/")
+                    if dedup not in seen_urls:
+                        seen_urls.add(dedup)
+                        all_jobs.append(j)
+                if llm_jobs:
+                    pw_page.remove_listener("response", on_response)
+                    continue
+                print(f"     ↳ LLM découvert pattern={discovered!r} mais 0 job extrait → requests fallback")
+            else:
+                print(f"     ↳ LLM n'a pas trouvé de pattern → requests fallback")
+
+            # ── Étape 8 : dernier recours requests ───────────────────────────
             jobs = _requests_fallback_url(page_url, site, headers, validate_mode=validate_mode)
             for j in jobs:
                 dedup = j["url"].split("?")[0].rstrip("/")
