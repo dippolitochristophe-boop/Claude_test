@@ -1015,6 +1015,8 @@ def main():
     if PLAYWRIGHT_AVAILABLE:
         try:
             playwright_ctx = sync_playwright().start()
+            from playwright_stealth import Stealth
+            Stealth().hook_playwright_context(playwright_ctx)
             browser = playwright_ctx.chromium.launch(headless=True)
             context = browser.new_context(user_agent=HEADERS["User-Agent"])
             pw_page = context.new_page()
