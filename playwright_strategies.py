@@ -116,6 +116,19 @@ JOB_LOC_KEYS    = [
 ]
 
 
+def _wait_stable(page, timeout: int = 4000) -> None:
+    """
+    Attend que la page soit stable après une action pouvant déclencher une navigation
+    (consent click, scroll, clic SPA). Fallback load → domcontentloaded si networkidle timeout.
+    """
+    for state in ("networkidle", "load"):
+        try:
+            page.wait_for_load_state(state, timeout=timeout)
+            return
+        except Exception:
+            continue
+
+
 def _dismiss_cookie_consent(page) -> str:
     """
     Tente d'accepter le cookie consent via un sélecteur CSS combiné (1 seul appel),
@@ -130,7 +143,7 @@ def _dismiss_cookie_consent(page) -> str:
         el = page.query_selector(combined)
         if el:
             el.click()
-            page.wait_for_timeout(600)
+            _wait_stable(page)  # consent peut déclencher une navigation SPA
             return combined
     except Exception:
         pass
@@ -138,7 +151,7 @@ def _dismiss_cookie_consent(page) -> str:
     for sel in [s for s in COOKIE_SELECTORS if s.startswith("button:has-text")]:
         try:
             page.click(sel, timeout=300)
-            page.wait_for_timeout(600)
+            _wait_stable(page)  # consent peut déclencher une navigation SPA
             return sel
         except Exception:
             continue
@@ -387,8 +400,6 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
         jobs = _requests_fallback(site, headers)
         return jobs, "requests-fallback (no browser)"
 
-    base_url = site["pages"][0]
-    base = f"{urlparse(base_url).scheme}://{urlparse(base_url).netloc}"
     company = site["name"]
     all_jobs = []
     seen_urls = set()
@@ -436,14 +447,16 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
             for _ in range(3):
                 try:
                     pw_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                    pw_page.wait_for_timeout(400)
                 except Exception:
-                    # Page navigated during scroll (redirect/SPA) — wait and continue
-                    try:
-                        pw_page.wait_for_load_state("load", timeout=8000)
-                    except Exception:
-                        pass
+                    # Page navigated during scroll — laisser se stabiliser
                     break
-                pw_page.wait_for_timeout(600)
+            _wait_stable(pw_page)
+
+            # ── Étape 3.5a : recalcul base depuis URL réelle ──────────────────
+            # pw_page.url peut différer de page_url après redirect SPA/consent
+            actual_url = pw_page.url
+            base = f"{urlparse(actual_url).scheme}://{urlparse(actual_url).netloc}"
 
             # ── Étape 3.5 : job_pattern effectif (cache → config) ─────────────
             # Cache check : 0 token. Surcharge job_pattern si LLM l'a déjà découvert.
@@ -460,7 +473,12 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
             found_sel = _wait_for_jobs_dom(pw_page, site.get("wait_for"), effective_pattern)
 
             # ── Étape 5 : parse DOM ───────────────────────────────────────────
-            dom_jobs = parse_jobs_from_html(pw_page.content(), effective_site, validate_mode=validate_mode)
+            try:
+                page_html = pw_page.content()
+            except Exception:
+                _wait_stable(pw_page)
+                page_html = pw_page.content()
+            dom_jobs = parse_jobs_from_html(page_html, effective_site, validate_mode=validate_mode)
             for j in dom_jobs:
                 j["source"] = "Playwright"
 
@@ -506,13 +524,13 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                 print(f"     ↳ DOM=0, aucune API JSON interceptée → LLM pattern discovery")
 
             if not effective_pattern:
-                discovered = _llm_discover_pattern(pw_page.content(), company)
+                discovered = _llm_discover_pattern(page_html, company)
             else:
                 discovered = None
             if discovered:
                 _cache_put(company, discovered)
                 llm_site = {**site, "job_pattern": discovered}
-                llm_jobs = parse_jobs_from_html(pw_page.content(), llm_site, validate_mode=validate_mode)
+                llm_jobs = parse_jobs_from_html(page_html, llm_site, validate_mode=validate_mode)
                 for j in llm_jobs:
                     j["source"] = "Playwright+LLM"
                     dedup = j["url"].split("?")[0].rstrip("/")
