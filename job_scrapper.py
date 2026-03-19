@@ -240,6 +240,7 @@ SITES = [
             "https://www.alpiq.com/career/open-jobs/jobs/job-page-5/f1-%2A/f2-%2A/search",
         ],
         "job_pattern": "/your-application/",
+        "wait_for": "a[href*='/your-application/']",
     },
     {
         "name": "Axpo",
