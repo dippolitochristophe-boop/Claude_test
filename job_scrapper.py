@@ -121,11 +121,6 @@ TITLE_NOISE = [
     "copyright", "terms", "legal", "gdpr", "show more", "load more",
 ]
 
-NON_REGRESSION = [
-    "Senior Power Trader", "Senior Power Trader (f/m/d)", "Risk Officer - Power",
-    "Head Intraday Algorithmic Trading", "PPA Sales Origination Manager", "Senior Gas Originator",
-]
-
 
 def _get_search_queries() -> list:
     """
@@ -1122,13 +1117,6 @@ def main():
     # ── Filtre new-only sur display ───────────────────────────────────────────
     if args.new_only:
         display_jobs = [j for j in display_jobs if j["url"] in new_urls]
-
-    # ── Non-régression ────────────────────────────────────────────────────────
-    all_titles = [j["title"] for j in all_jobs]
-    print("\n── ✅ Non-régression ────────────────────────────────────────")
-    for ref in NON_REGRESSION:
-        found = any(ref.lower() in t.lower() for t in all_titles)
-        print(f"   {'✅' if found else '⚠️  MANQUANT'} — {ref}")
 
     # ── Affichage par bucket ──────────────────────────────────────────────────
     print("\n" + "=" * 65)
