@@ -515,7 +515,7 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                     pw_page.remove_listener("response", on_response)
                     continue
                 print(f"     ↳ LLM découvert pattern={discovered!r} mais 0 job extrait → requests fallback")
-            else:
+            elif not effective_pattern:
                 print(f"     ↳ LLM n'a pas trouvé de pattern → requests fallback")
 
             # ── Étape 8 : dernier recours requests ───────────────────────────
