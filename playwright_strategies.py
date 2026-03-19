@@ -486,15 +486,21 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                 continue
 
             # ── Étape 7 : LLM pattern discovery ──────────────────────────────
-            # Fires uniquement si DOM=0 et API=0. Résultat mis en cache → 0 token aux runs suivants.
+            # Fires uniquement si DOM=0, API=0, et aucun pattern connu (cache ou config).
+            # Si effective_pattern déjà connu → skip LLM, requests fallback direct.
             if intercepted_apis:
                 print(f"     ↳ DOM=0, {len(intercepted_apis)} API(s) interceptée(s) — structures non reconnues :")
                 for api_url, body in intercepted_apis:
                     _log_unrecognized_api(api_url, body)
+            elif effective_pattern:
+                print(f"     ↳ DOM=0, pattern connu ({effective_pattern!r}) → requests fallback direct")
             else:
                 print(f"     ↳ DOM=0, aucune API JSON interceptée → LLM pattern discovery")
 
-            discovered = _llm_discover_pattern(pw_page.content(), company)
+            if not effective_pattern:
+                discovered = _llm_discover_pattern(pw_page.content(), company)
+            else:
+                discovered = None
             if discovered:
                 _cache_put(company, discovered)
                 llm_site = {**site, "job_pattern": discovered}
