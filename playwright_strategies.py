@@ -478,9 +478,12 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
             except Exception:
                 _wait_stable(pw_page)
                 page_html = pw_page.content()
-            dom_jobs = parse_jobs_from_html(page_html, effective_site, validate_mode=validate_mode)
+            dom_jobs_raw = parse_jobs_from_html(page_html, effective_site)
+            dom_jobs = dom_jobs_raw if validate_mode else [j for j in dom_jobs_raw if is_relevant_title(j["title"])]
             for j in dom_jobs:
                 j["source"] = "Playwright"
+            if not validate_mode and len(dom_jobs_raw) != len(dom_jobs):
+                print(f"     ↳ DOM brut: {len(dom_jobs_raw)} lien(s) → {len(dom_jobs)} après filtre titre")
 
             if dom_jobs:
                 strategy = f"Playwright DOM (nav={nav_strategy}, consent={bool(consent_sel)}, sel={found_sel})"
@@ -530,9 +533,12 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
             if discovered:
                 _cache_put(company, discovered)
                 llm_site = {**site, "job_pattern": discovered}
-                llm_jobs = parse_jobs_from_html(page_html, llm_site, validate_mode=validate_mode)
+                llm_jobs_raw = parse_jobs_from_html(page_html, llm_site)
+                llm_jobs = llm_jobs_raw if validate_mode else [j for j in llm_jobs_raw if is_relevant_title(j["title"])]
                 for j in llm_jobs:
                     j["source"] = "Playwright+LLM"
+                if not validate_mode and len(llm_jobs_raw) != len(llm_jobs):
+                    print(f"     ↳ LLM DOM brut: {len(llm_jobs_raw)} lien(s) → {len(llm_jobs)} après filtre titre")
                     dedup = j["url"].split("?")[0].rstrip("/")
                     if dedup not in seen_urls:
                         seen_urls.add(dedup)
@@ -576,7 +582,7 @@ def _requests_fallback(site: dict, headers: dict = None, validate_mode: bool = F
 
 def _requests_fallback_url(url: str, site: dict, headers: dict = None,
                             validate_mode: bool = False) -> list[dict]:
-    from job_scrapper import parse_jobs_from_html
+    from job_scrapper import parse_jobs_from_html, is_relevant_title
     _h = headers or {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
         "Accept": "text/html,*/*",
@@ -584,9 +590,12 @@ def _requests_fallback_url(url: str, site: dict, headers: dict = None,
     try:
         r = requests.get(url, headers=_h, timeout=15, verify=False)
         if r.status_code == 200:
-            jobs = parse_jobs_from_html(r.text, site, validate_mode=validate_mode)
+            raw = parse_jobs_from_html(r.text, site)
+            jobs = raw if validate_mode else [j for j in raw if is_relevant_title(j["title"])]
             for j in jobs:
                 j["source"] = "requests"
+            if not validate_mode and len(raw) != len(jobs):
+                print(f"     ↳ requests brut: {len(raw)} lien(s) → {len(jobs)} après filtre titre")
             return jobs
         else:
             print(f"     ↳ requests HTTP {r.status_code}")

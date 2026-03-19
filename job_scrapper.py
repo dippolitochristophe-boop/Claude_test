@@ -394,10 +394,10 @@ GREENHOUSE_COMPANIES = [
 
 # ── Parser HTML commun ────────────────────────────────────────────────────────
 
-def parse_jobs_from_html(html: str, site: dict, validate_mode: bool = False) -> list[dict]:
+def parse_jobs_from_html(html: str, site: dict) -> list[dict]:
     """
-    Parse le HTML (qu'il vienne de Playwright ou requests) — logique identique.
-    validate_mode=True : désactive is_relevant_title (health-check / Agent 3).
+    Parse le HTML — retourne TOUS les jobs matching job_pattern, sans filtre métier.
+    Le filtrage is_relevant_title est à la charge de l'appelant.
     """
     soup = BeautifulSoup(html, "html.parser")
     jobs = []
@@ -414,17 +414,15 @@ def parse_jobs_from_html(html: str, site: dict, validate_mode: bool = False) -> 
             if site["job_pattern"] not in href:
                 continue
 
-        # Titre : lien lui-même, sinon heading dans le parent
+        # Titre : lien lui-même, sinon heading dans le parent si lien vide
         text = a.get_text(strip=True)
-        if not validate_mode and not is_relevant_title(text):
+        if not text:
             parent = a.find_parent(["li", "article", "div", "section"])
             if parent:
                 heading = parent.find(["h2", "h3", "h4"])
                 text = heading.get_text(strip=True) if heading else parent.get_text(separator=" ", strip=True)[:100]
 
         if not text:
-            continue
-        if not validate_mode and not is_relevant_title(text):
             continue
 
         # Localisation : cherche dans le parent, préfère la chaîne la plus courte
@@ -485,11 +483,14 @@ def _get_jobs_requests(url: str, site: dict) -> list[dict]:
     try:
         r = requests.get(url, headers=HEADERS, timeout=15, verify=False)
         if r.status_code == 200:
-            jobs = parse_jobs_from_html(r.text, site)
+            raw = parse_jobs_from_html(r.text, site)
+            jobs = [j for j in raw if is_relevant_title(j["title"])]
             for j in jobs:
                 j["source"] = "requests"
-            if not jobs:
+            if not raw:
                 print(f"     ↳ requests OK (HTTP 200) — 0 lien '{site['job_pattern']}' trouvé → vérifier job_pattern ou rendu JS")
+            elif not jobs:
+                print(f"     ↳ requests OK — {len(raw)} lien(s) brut(s), 0 pertinent après filtre titre")
             return jobs
         else:
             print(f"     ↳ requests HTTP {r.status_code} — config ATS à vérifier")
