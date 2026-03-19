@@ -53,6 +53,12 @@ try:
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
+
+try:
+    from profiles import profile_display_name
+except ImportError:
+    def profile_display_name(profile: dict) -> str:  # type: ignore[misc]
+        return profile.get("name", "Job Scraper")
     print("")
     print("=" * 65)
     print("  🚨 PLAYWRIGHT NON INSTALLE — RESULTATS INCOMPLETS 🚨")
