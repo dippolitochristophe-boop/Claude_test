@@ -159,13 +159,13 @@ def _navigate(page, url: str) -> str:
     return "error"
 
 
-def _wait_for_jobs_dom(page, wait_for: str | None) -> str:
+def _wait_for_jobs_dom(page, wait_for: str | None, job_pattern: str | None = None) -> str:
     """
     Attend que des job links apparaissent dans le DOM.
-    Utilise 1 sélecteur CSS combiné pour tous les patterns (rapide).
+    Stratégie : wait_for config > sélecteur dérivé de job_pattern > JOB_LINK_PATTERNS.
     Retourne le premier sélecteur qui matche, ou ''.
     """
-    # Priorité au wait_for de la config
+    # Priorité au wait_for explicite de la config
     if wait_for:
         try:
             page.wait_for_selector(wait_for, timeout=6000)
@@ -174,12 +174,17 @@ def _wait_for_jobs_dom(page, wait_for: str | None) -> str:
         except Exception:
             pass
 
-    # Sélecteur combiné → 1 seul appel réseau au lieu de 10
-    combined = ", ".join(JOB_LINK_PATTERNS)
+    # Dériver un sélecteur depuis job_pattern si défini et non-wildcard
+    derived: list[str] = []
+    if job_pattern and job_pattern != "*":
+        derived = [f"a[href*='{job_pattern}']"]
+
+    # Sélecteur combiné : job_pattern dérivé + patterns génériques
+    candidates = derived + JOB_LINK_PATTERNS
+    combined = ", ".join(dict.fromkeys(candidates))  # déduplique, préserve l'ordre
     try:
         page.wait_for_selector(combined, timeout=6000)
-        # Trouve lequel a matché
-        for sel in JOB_LINK_PATTERNS:
+        for sel in candidates:
             if page.query_selector(sel):
                 return sel
     except Exception:
@@ -397,7 +402,7 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                 pw_page.wait_for_timeout(600)
 
             # ── Étape 4 : attente DOM jobs ────────────────────────────────────
-            found_sel = _wait_for_jobs_dom(pw_page, site.get("wait_for"))
+            found_sel = _wait_for_jobs_dom(pw_page, site.get("wait_for"), site.get("job_pattern"))
 
             # ── Étape 5 : parse DOM ───────────────────────────────────────────
             dom_jobs = parse_jobs_from_html(pw_page.content(), site, validate_mode=validate_mode)
