@@ -324,67 +324,110 @@ def _fetch_all_pages(url: str, method: str, req_headers: dict,
     # ── Stratégie 0 : browser fetch (pw_page) — contourne proxy/cookies ─────
     if pw_page is not None:
         try:
-            # Détermine le body à envoyer
+            # Detect pagination keys + original page size from post_data
             offset_key, limit_key = "From", "To"
+            orig_take: int | None = None
             if post_data:
                 try:
                     orig = json.loads(post_data)
-                    for k in orig:
+                    for k, v in orig.items():
                         if k.lower() in {ok.lower() for ok in _OFFSET_KEYS}:
                             offset_key = k
                         if k.lower() in {lk.lower() for lk in _LIMIT_KEYS}:
                             limit_key = k
+                            if isinstance(v, int) and v > 0:
+                                orig_take = v
                 except Exception:
                     pass
-            if strip_filters:
-                fetch_body = json.dumps({offset_key: 0, limit_key: cap})
-            elif post_data:
-                try:
-                    payload = json.loads(post_data)
-                    for k in list(payload.keys()):
-                        if k.lower() in {lk.lower() for lk in _LIMIT_KEYS}:
-                            payload[k] = cap
-                        elif k.lower() in {ok.lower() for ok in _OFFSET_KEYS}:
-                            payload[k] = 0
-                    fetch_body = json.dumps(payload)
-                except Exception:
-                    fetch_body = post_data or "null"
-            else:
-                fetch_body = "null"
 
             # Forward original headers (includes CSRF tokens, auth, etc.)
-            # Exclude headers that would conflict or cause issues
-            _SKIP_HEADERS = {"content-length", "host", "content-type", "transfer-encoding",
-                             "connection", "accept-encoding"}
-            forward_headers = {k: v for k, v in req_headers.items()
-                               if k.lower() not in _SKIP_HEADERS}
-            forward_headers["Content-Type"] = "application/json"
+            _SKIP_HDRS = {"content-length", "host", "content-type", "transfer-encoding",
+                          "connection", "accept-encoding"}
+            fwd_headers = {k: v for k, v in req_headers.items()
+                           if k.lower() not in _SKIP_HDRS}
+            fwd_headers["Content-Type"] = "application/json"
 
-            logger.debug("  [refetch] strat0 pw_page.evaluate  url=%s  body=%s  headers=%s",
-                         url.split("?")[0][-60:], fetch_body[:120], list(forward_headers.keys()))
-            js = f"""
-            async () => {{
-                const r = await fetch({json.dumps(url)}, {{
-                    method: {json.dumps(method)},
-                    headers: {json.dumps(forward_headers)},
-                    body: {fetch_body if method == "POST" else "undefined"}
-                }});
-                if (!r.ok) return {{"__status": r.status}};
-                return await r.json();
-            }}
-            """
-            data = pw_page.evaluate(js)
-            if isinstance(data, dict) and "__status" in data:
-                logger.debug("  [refetch] strat0 HTTP %d → skip", data["__status"])
-            elif data and _find_job_list_in_body(data):
-                logger.debug("  [refetch] strat0 OK → job_list=%d", len(_find_job_list_in_body(data)))
-                return data
-            else:
-                logger.debug("  [refetch] strat0 returned data but no job_list: type=%s keys=%s",
-                             type(data).__name__,
-                             list(data.keys())[:8] if isinstance(data, dict) else "—")
+            def _build_body(skip: int, take: int) -> str:
+                if strip_filters:
+                    return json.dumps({offset_key: skip, limit_key: take})
+                if post_data:
+                    try:
+                        p = json.loads(post_data)
+                        for k in list(p.keys()):
+                            if k.lower() in {lk.lower() for lk in _LIMIT_KEYS}:
+                                p[k] = take
+                            elif k.lower() in {ok.lower() for ok in _OFFSET_KEYS}:
+                                p[k] = skip
+                        return json.dumps(p)
+                    except Exception:
+                        pass
+                return "null"
+
+            def _pw_fetch(skip: int, take: int) -> tuple[dict | list | None, int]:
+                """Returns (data, http_status). data=None means error/non-200."""
+                body_str = _build_body(skip, take)
+                js = f"""
+                async () => {{
+                    const r = await fetch({json.dumps(url)}, {{
+                        method: {json.dumps(method)},
+                        headers: {json.dumps(fwd_headers)},
+                        body: {body_str if method == "POST" else "undefined"}
+                    }});
+                    if (!r.ok) return {{"__status": r.status}};
+                    return await r.json();
+                }}
+                """
+                d = pw_page.evaluate(js)
+                if isinstance(d, dict) and "__status" in d:
+                    return None, d["__status"]
+                return d, 200
+
+            # Try decreasing page sizes until one works (API may limit max page size)
+            sizes = list(dict.fromkeys([cap, min(cap, 100), min(cap, 50), min(cap, 25)]))
+            if orig_take and orig_take not in sizes:
+                sizes.append(orig_take)
+
+            for try_size in sizes:
+                if try_size <= 0:
+                    continue
+                logger.debug("  [refetch] strat0 take=%d  url=%s", try_size, url.split("?")[0][-60:])
+                data, status = _pw_fetch(0, try_size)
+                if data is None:
+                    logger.debug("  [refetch] strat0 take=%d → HTTP %d", try_size, status)
+                    continue
+
+                job_list = _find_job_list_in_body(data)
+                if not job_list:
+                    logger.debug("  [refetch] strat0 take=%d → no job_list in response", try_size)
+                    continue
+
+                if len(job_list) >= total:
+                    logger.debug("  [refetch] strat0 OK → all %d jobs in one shot", len(job_list))
+                    return data
+
+                # Got partial results → paginate
+                logger.debug("  [refetch] strat0 take=%d → %d/%d, paginating...", try_size, len(job_list), total)
+                all_items: list = list(job_list)
+                skip_val = try_size
+                while skip_val < total and len(all_items) < total:
+                    page_data, page_status = _pw_fetch(skip_val, try_size)
+                    if page_data is None:
+                        logger.debug("  [refetch] strat0 pagination skip=%d → HTTP %d, stopping", skip_val, page_status)
+                        break
+                    page_jobs = _find_job_list_in_body(page_data)
+                    if not page_jobs:
+                        break
+                    all_items.extend(page_jobs)
+                    skip_val += try_size
+                    logger.debug("  [refetch] strat0 pagination skip=%d → +%d (total=%d)", skip_val, len(page_jobs), len(all_items))
+
+                if all_items:
+                    logger.debug("  [refetch] strat0 pagination complete → %d items", len(all_items))
+                    return all_items  # list — _find_job_list_in_body handles it
+                break  # got 200 but pagination failed, don't try smaller sizes
+
         except Exception as e:
-            logger.debug("  [refetch] strat0 exception: %s", str(e)[:100])
+            logger.debug("  [refetch] strat0 exception: %s", str(e)[:120])
 
     # ── Stratégie 1 : body minimal pour strip les filtres (POST JSON) ────────
     if strip_filters and (method == "POST" or post_data):
