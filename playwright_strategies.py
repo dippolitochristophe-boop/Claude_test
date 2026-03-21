@@ -352,13 +352,21 @@ def _fetch_all_pages(url: str, method: str, req_headers: dict,
             else:
                 fetch_body = "null"
 
-            logger.debug("  [refetch] strat0 pw_page.evaluate  url=%s  body=%s",
-                         url.split("?")[0][-60:], fetch_body[:120])
+            # Forward original headers (includes CSRF tokens, auth, etc.)
+            # Exclude headers that would conflict or cause issues
+            _SKIP_HEADERS = {"content-length", "host", "content-type", "transfer-encoding",
+                             "connection", "accept-encoding"}
+            forward_headers = {k: v for k, v in req_headers.items()
+                               if k.lower() not in _SKIP_HEADERS}
+            forward_headers["Content-Type"] = "application/json"
+
+            logger.debug("  [refetch] strat0 pw_page.evaluate  url=%s  body=%s  headers=%s",
+                         url.split("?")[0][-60:], fetch_body[:120], list(forward_headers.keys()))
             js = f"""
             async () => {{
                 const r = await fetch({json.dumps(url)}, {{
                     method: {json.dumps(method)},
-                    headers: {{"Content-Type": "application/json"}},
+                    headers: {json.dumps(forward_headers)},
                     body: {fetch_body if method == "POST" else "undefined"}
                 }});
                 if (!r.ok) return {{"__status": r.status}};
