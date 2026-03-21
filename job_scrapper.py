@@ -297,7 +297,13 @@ SITES = [
     {
         "name": "RWE",
         "type": "html",
-        "pages": ["https://www.rwe.com/en/rwe-careers-portal/job-offers/"],
+        # searchTerm= filtre côté Sitecore → réduit de 171 jobs globaux aux rôles trading/origination
+        # Multiple pages car le portail ne supporte pas OR dans searchTerm
+        "pages": [
+            "https://www.rwe.com/en/rwe-careers-portal/job-offers/?searchTerm=trader",
+            "https://www.rwe.com/en/rwe-careers-portal/job-offers/?searchTerm=origination",
+            "https://www.rwe.com/en/rwe-careers-portal/job-offers/?searchTerm=portfolio",
+        ],
         "job_pattern": "/job-offers/details/",
         "wait_for": "a[href*='/job-offers/details/']",  # SPA : attendre injection DOM
     },
