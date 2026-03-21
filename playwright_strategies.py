@@ -801,6 +801,7 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
             # ── Étape 6 : DOM vide → analyse APIs interceptées ────────────────
             logger.debug("[%s] DOM=0 → analysing %d intercepted API(s)", company, len(intercepted_apis))
             api_jobs = []
+            pagination_total = 0  # total déclaré par l'API quand re-fetch a échoué
             for api_url, method, req_headers, post_data, body in intercepted_apis:
                 logger.debug("[%s]   API %s %s  body_type=%s", company, method,
                              api_url.split("?")[0][-80:], type(body).__name__)
@@ -824,12 +825,66 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                                 logger.debug("[%s]   re-fetch result: %d jobs (%s)", company, n_full, tag)
                                 print(f"     ↳ {tag} ({len(job_list)}/{total}) → re-fetch: {n_full} jobs")
                                 effective_body = full
+                            else:
+                                # Re-fetch bloqué → noter le total pour UI pagination
+                                pagination_total = max(pagination_total, total or 0)
                 candidate_jobs = _parse_api_jobs(effective_body, company, validate_mode=validate_mode)
                 logger.debug("[%s]   candidate_jobs from this API: %d", company, len(candidate_jobs))
                 for j in candidate_jobs:
                     if j["url"].startswith("/"):
                         j["url"] = base + j["url"]
                     api_jobs.append(j)
+
+            # ── Étape 6.5 : UI pagination — scroll + load-more si re-fetch bloqué ──
+            # Quand l'API déclare plus de jobs que reçus ET le re-fetch est bloqué (403),
+            # on laisse le browser faire les appels lui-même via scroll/clic load-more.
+            if not api_jobs and pagination_total > 0:
+                logger.debug("[%s] UI pagination fallback: total=%d, trying scroll+load-more",
+                             company, pagination_total)
+                _LOAD_MORE_SELS = [
+                    "button:has-text('Load more')",   "button:has-text('Show more')",
+                    "button:has-text('Mehr laden')",  "button:has-text('Meer laden')",
+                    "button:has-text('Plus de résultats')",
+                    ".load-more", ".btn-load-more", "[data-action='load-more']",
+                    "[data-testid*='load-more']", "a:has-text('Load more')",
+                ]
+                max_ui_attempts = min(pagination_total // 5 + 2, 30)
+                for attempt in range(max_ui_attempts):
+                    prev_intercept_count = len(intercepted_apis)
+                    clicked = False
+                    for sel in _LOAD_MORE_SELS:
+                        try:
+                            pw_page.click(sel, timeout=400)
+                            _wait_stable(pw_page)
+                            clicked = True
+                            logger.debug("[%s] UI pagination attempt %d: clicked %r", company, attempt + 1, sel)
+                            break
+                        except Exception:
+                            continue
+                    if not clicked:
+                        try:
+                            pw_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                            pw_page.wait_for_timeout(1200)
+                        except Exception:
+                            break
+
+                    # Analyser les nouvelles APIs interceptées depuis le dernier passage
+                    new_jobs = []
+                    for _, _, _, _, body in intercepted_apis[prev_intercept_count:]:
+                        for j in _parse_api_jobs(body, company, validate_mode=validate_mode):
+                            if j["url"].startswith("/"):
+                                j["url"] = base + j["url"]
+                            new_jobs.append(j)
+                    if not new_jobs:
+                        logger.debug("[%s] UI pagination attempt %d: no new jobs → stop", company, attempt + 1)
+                        break
+                    api_jobs.extend(new_jobs)
+                    logger.debug("[%s] UI pagination attempt %d: +%d jobs (total=%d)",
+                                 company, attempt + 1, len(new_jobs), len(api_jobs))
+                    if len(api_jobs) >= pagination_total:
+                        break
+                if api_jobs:
+                    logger.debug("[%s] UI pagination complete → %d jobs", company, len(api_jobs))
 
             if api_jobs:
                 strategy = f"API auto-detected ({len(intercepted_apis)} APIs interceptées, consent={bool(consent_sel)})"
