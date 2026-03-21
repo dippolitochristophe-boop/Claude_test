@@ -352,6 +352,8 @@ def _fetch_all_pages(url: str, method: str, req_headers: dict,
             else:
                 fetch_body = "null"
 
+            logger.debug("  [refetch] strat0 pw_page.evaluate  url=%s  body=%s",
+                         url.split("?")[0][-60:], fetch_body[:120])
             js = f"""
             async () => {{
                 const r = await fetch({json.dumps(url)}, {{
@@ -359,15 +361,22 @@ def _fetch_all_pages(url: str, method: str, req_headers: dict,
                     headers: {{"Content-Type": "application/json"}},
                     body: {fetch_body if method == "POST" else "undefined"}
                 }});
-                if (!r.ok) return null;
+                if (!r.ok) return {{"__status": r.status}};
                 return await r.json();
             }}
             """
             data = pw_page.evaluate(js)
-            if data and _find_job_list_in_body(data):
+            if isinstance(data, dict) and "__status" in data:
+                logger.debug("  [refetch] strat0 HTTP %d → skip", data["__status"])
+            elif data and _find_job_list_in_body(data):
+                logger.debug("  [refetch] strat0 OK → job_list=%d", len(_find_job_list_in_body(data)))
                 return data
-        except Exception:
-            pass
+            else:
+                logger.debug("  [refetch] strat0 returned data but no job_list: type=%s keys=%s",
+                             type(data).__name__,
+                             list(data.keys())[:8] if isinstance(data, dict) else "—")
+        except Exception as e:
+            logger.debug("  [refetch] strat0 exception: %s", str(e)[:100])
 
     # ── Stratégie 1 : body minimal pour strip les filtres (POST JSON) ────────
     if strip_filters and (method == "POST" or post_data):
@@ -407,11 +416,13 @@ def _fetch_all_pages(url: str, method: str, req_headers: dict,
                     changed = True
             if not changed:
                 payload["limit"] = cap
+            logger.debug("  [refetch] strat1 requests.post  payload=%s", str(payload)[:120])
             r = requests.post(url, json=payload, headers=h, timeout=20)
+            logger.debug("  [refetch] strat1 status=%d", r.status_code)
             if r.status_code == 200:
                 return r.json()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("  [refetch] strat1 exception: %s", str(e)[:100])
 
     # ── Stratégie 2 : query params (GET ou POST sans JSON body) ─────────────
     try:
@@ -429,12 +440,15 @@ def _fetch_all_pages(url: str, method: str, req_headers: dict,
             params["limit"] = [str(cap)]
         new_url = urlunparse(parsed._replace(query=urlencode(params, doseq=True)))
         fn = requests.post if method == "POST" else requests.get
+        logger.debug("  [refetch] strat2 %s %s", method, new_url[-80:])
         r = fn(new_url, headers=h, timeout=20)
+        logger.debug("  [refetch] strat2 status=%d", r.status_code)
         if r.status_code == 200:
             return r.json()
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("  [refetch] strat2 exception: %s", str(e)[:100])
 
+    logger.debug("  [refetch] all strategies failed → None")
     return None
 
 
@@ -498,6 +512,10 @@ def _parse_api_jobs(body, company_name: str, validate_mode: bool = False) -> lis
     if not job_list:
         return []
 
+    logger.debug("  [parse_api] job_list=%d  company=%s  validate_mode=%s",
+                 len(job_list), company_name, validate_mode)
+
+    filtered_count = 0
     for item in job_list:
         if not isinstance(item, dict):
             continue
@@ -515,6 +533,10 @@ def _parse_api_jobs(body, company_name: str, validate_mode: bool = False) -> lis
                  or _heuristic_title(d))
 
         if not title or (not validate_mode and not is_relevant_title(title)):
+            if filtered_count < 10:
+                logger.debug("  [parse_api]   FILTERED title=%r  relevant=%s",
+                             title, is_relevant_title(title) if title else "no_title")
+            filtered_count += 1
             continue
 
         # URL — clés connues CI, puis heuristique
