@@ -27,8 +27,11 @@ from datetime import datetime
 import urllib3
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+from agents.log import get_logger, init_run_log
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+logger = get_logger("scraper")
 
 SEEN_FILE = ".jobs_seen.json"
 
@@ -978,6 +981,9 @@ def generate_html_report(jobs: list, new_urls: set = None) -> str:
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
+    log_path = init_run_log()
+    print(f"📋 Log détaillé : {log_path}")
+
     args = parse_args()
 
     # ── Chargement du profil ──────────────────────────────────────────────────
@@ -1045,35 +1051,49 @@ def main():
         print("── Workday API ──────────────────────────────────────────────")
         for co in workday_cos:
             print(f"🏢 {co['name']}...", end=" ", flush=True)
+            logger.debug("[workday] start %s  config=%s", co["name"], co)
             jobs = scrape_workday(co)
+            logger.debug("[workday] %s → %d jobs", co["name"], len(jobs))
+            if jobs:
+                for j in jobs[:3]:
+                    logger.debug("[workday]   title=%r  loc=%r  url=%r", j.get("title"), j.get("location"), j.get("url"))
             print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
             all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(1)
 
         print("\n── SmartRecruiters API ──────────────────────────────────────")
         for co in sr_cos:
             print(f"🏢 {co['name']}...", end=" ", flush=True)
+            logger.debug("[smartrecruiters] start %s  sr_id=%s", co["name"], co.get("sr_id"))
             jobs = scrape_smartrecruiters(co)
+            logger.debug("[smartrecruiters] %s → %d jobs", co["name"], len(jobs))
             print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
             all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(1)
 
         if run_uniper:
             print("\n── Uniper API ───────────────────────────────────────────────")
             print("🏢 Uniper...", end=" ", flush=True)
+            logger.debug("[uniper] start")
             jobs = scrape_uniper()
+            logger.debug("[uniper] → %d jobs", len(jobs))
             print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
             all_jobs.extend(jobs); summary["Uniper"] = len(jobs)
 
         print("\n── Greenhouse API ───────────────────────────────────────────")
         for co in greenhouse_cos:
             print(f"🏢 {co['name']}...", end=" ", flush=True)
+            logger.debug("[greenhouse] start %s  board_token=%s  region=%s",
+                         co["name"], co.get("board_token"), co.get("region", "us"))
             jobs = scrape_greenhouse(co)
+            logger.debug("[greenhouse] %s → %d jobs", co["name"], len(jobs))
             print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
             all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(0.5)
 
         print("\n── Oracle Taleo (TotalEnergies, Macquarie) ──────────────────")
         for co in taleo_cos:
             print(f"🏢 {co['name']}...", end=" ", flush=True)
+            logger.debug("[taleo] start %s", co["name"])
             jobs = scrape_taleo(co)
+            logger.debug("[taleo] %s → %d jobs", co["name"], len(jobs))
             print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
             all_jobs.extend(jobs); summary[co["name"]] = len(jobs)
 
@@ -1081,8 +1101,14 @@ def main():
         print("\n── Sites HTML ───────────────────────────────────────────────")
         for site in sites:
             print(f"🏢 {site['name']}...", end=" ", flush=True)
+            logger.debug("[html] start %s  pages=%s  job_pattern=%r",
+                         site["name"], site.get("pages", [])[:2], site.get("job_pattern"))
             jobs = scrape_site(site, pw_page=pw_page)
             src = set(j["source"] for j in jobs) if jobs else set()
+            logger.debug("[html] %s → %d jobs  sources=%s", site["name"], len(jobs), src)
+            if jobs:
+                for j in jobs[:3]:
+                    logger.debug("[html]   title=%r  loc=%r", j.get("title"), j.get("location"))
             print(f"✅ {len(jobs)} [{', '.join(src)}]" if jobs else "⚠️  0")
             all_jobs.extend(jobs); summary[site["name"]] = len(jobs); time.sleep(0.5)
 
@@ -1098,6 +1124,7 @@ def main():
                 pass
 
     # ── Score + tri ───────────────────────────────────────────────────────────
+    logger.debug("[summary] total raw jobs collected: %d  breakdown: %s", len(all_jobs), summary)
     for job in all_jobs:
         job["score"] = score_job(job)
 

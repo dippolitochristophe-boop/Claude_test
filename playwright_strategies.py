@@ -31,8 +31,11 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8")
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+from agents.log import get_logger
 
 urllib3.disable_warnings()
+
+logger = get_logger("playwright")
 
 # ── Patterns cookie consent (ordre : du plus spécifique au plus générique) ────
 
@@ -467,20 +470,17 @@ def _log_unrecognized_api(api_url: str, body) -> None:
     if isinstance(body, list):
         sample = body[0] if body else {}
         keys = list(sample.keys())[:10] if isinstance(sample, dict) else [type(sample).__name__]
-        print(f"       • LIST[{len(body)}] {short}")
-        print(f"         item_keys={keys}")
+        logger.debug("  [api-unrecognized] LIST[%d] %s  item_keys=%s", len(body), short, keys)
     elif isinstance(body, dict):
         top = list(body.keys())[:10]
         lists = {k: len(v) for k, v in body.items() if isinstance(v, list) and v}
         nested = {k: list(v.keys())[:6] for k, v in body.items() if isinstance(v, dict)}
-        print(f"       • DICT {short}")
-        print(f"         top_keys={top}  lists={lists}")
+        logger.debug("  [api-unrecognized] DICT %s  top_keys=%s  lists=%s", short, top, lists)
         if nested:
-            print(f"         nested={nested}")
-        # Clés des items dans les listes ≥2 dicts → aide à identifier les champs titre/url
+            logger.debug("  [api-unrecognized]   nested=%s", nested)
         for k, v in body.items():
             if isinstance(v, list) and len(v) >= 2 and isinstance(v[0], dict):
-                print(f"         {k}[0]_keys={list(v[0].keys())[:12]}")
+                logger.debug("  [api-unrecognized]   %s[0]_keys=%s", k, list(v[0].keys())[:12])
 
 
 def _parse_api_jobs(body, company_name: str, validate_mode: bool = False) -> list[dict]:
@@ -589,7 +589,7 @@ def _llm_discover_pattern(html: str, company_name: str) -> str | None:
             if pattern and isinstance(pattern, str):
                 return pattern
     except Exception as e:
-        print(f"     ↳ LLM pattern discovery failed: {str(e)[:80]}")
+        logger.warning("LLM pattern discovery failed for %s: %s", company_name, str(e)[:80])
     return None
 
 
@@ -651,8 +651,11 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
 
         try:
             # ── Étape 1 : navigation ──────────────────────────────────────────
+            logger.debug("[%s] navigate → %s", company, page_url)
             nav_strategy = _navigate(pw_page, page_url)
+            logger.debug("[%s] nav_strategy=%s", company, nav_strategy)
             if nav_strategy == "error":
+                logger.debug("[%s] nav error → requests fallback for %s", company, page_url)
                 pw_page.remove_listener("response", on_response)
                 jobs = _requests_fallback_url(page_url, site, headers, validate_mode=validate_mode)
                 for j in jobs:
@@ -664,6 +667,8 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
 
             # ── Étape 2 : cookie consent ──────────────────────────────────────
             consent_sel = _dismiss_cookie_consent(pw_page)
+            if consent_sel:
+                logger.debug("[%s] cookie consent dismissed: %s", company, consent_sel)
 
             # ── Étape 3 : scroll pour lazy-loading ───────────────────────────
             for _ in range(3):
@@ -693,6 +698,8 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
 
             # ── Étape 4 : attente DOM jobs ────────────────────────────────────
             found_sel = _wait_for_jobs_dom(pw_page, site.get("wait_for"), effective_pattern)
+            logger.debug("[%s] wait_for_jobs_dom → sel=%r  effective_pattern=%r",
+                         company, found_sel, effective_pattern)
 
             # ── Étape 5 : parse DOM ───────────────────────────────────────────
             try:
@@ -704,6 +711,7 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
             dom_jobs = dom_jobs_raw if validate_mode else [j for j in dom_jobs_raw if is_relevant_title(j["title"])]
             for j in dom_jobs:
                 j["source"] = "Playwright"
+            logger.debug("[%s] DOM parse: raw=%d  after_filter=%d", company, len(dom_jobs_raw), len(dom_jobs))
             if not validate_mode and len(dom_jobs_raw) != len(dom_jobs):
                 print(f"     ↳ DOM brut: {len(dom_jobs_raw)} lien(s) → {len(dom_jobs)} après filtre titre")
 
@@ -718,15 +726,21 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                 continue
 
             # ── Étape 6 : DOM vide → analyse APIs interceptées ────────────────
+            logger.debug("[%s] DOM=0 → analysing %d intercepted API(s)", company, len(intercepted_apis))
             api_jobs = []
             for api_url, method, req_headers, post_data, body in intercepted_apis:
+                logger.debug("[%s]   API %s %s  body_type=%s", company, method,
+                             api_url.split("?")[0][-80:], type(body).__name__)
                 # Pagination : si total déclaré > items reçus → re-fetch complet
                 effective_body = body
                 if isinstance(body, dict):
                     job_list = _find_job_list_in_body(body)
                     if job_list:
                         total, filtered = _total_count_from_body(body)
+                        logger.debug("[%s]   job_list=%d  total=%s  filtered=%s",
+                                     company, len(job_list), total, filtered)
                         if total and (total > len(job_list) or filtered):
+                            logger.debug("[%s]   pagination/filter detected → re-fetch (cap=%d)", company, total)
                             full = _fetch_all_pages(api_url, method, req_headers,
                                                     post_data, total,
                                                     strip_filters=filtered,
@@ -734,9 +748,11 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                             if full is not None:
                                 n_full = len(_find_job_list_in_body(full) or [])
                                 tag = "filtre supprimé" if filtered else "pagination"
+                                logger.debug("[%s]   re-fetch result: %d jobs (%s)", company, n_full, tag)
                                 print(f"     ↳ {tag} ({len(job_list)}/{total}) → re-fetch: {n_full} jobs")
                                 effective_body = full
                 candidate_jobs = _parse_api_jobs(effective_body, company, validate_mode=validate_mode)
+                logger.debug("[%s]   candidate_jobs from this API: %d", company, len(candidate_jobs))
                 for j in candidate_jobs:
                     if j["url"].startswith("/"):
                         j["url"] = base + j["url"]
@@ -756,16 +772,20 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
             # Fires uniquement si DOM=0, API=0, et aucun pattern connu (cache ou config).
             # Si effective_pattern déjà connu → skip LLM, requests fallback direct.
             if intercepted_apis:
+                logger.debug("[%s] DOM=0, %d API(s) — structures non reconnues", company, len(intercepted_apis))
                 print(f"     ↳ DOM=0, {len(intercepted_apis)} API(s) interceptée(s) — structures non reconnues :")
                 for api_url, _m, _rh, _pd, body in intercepted_apis:
                     _log_unrecognized_api(api_url, body)
             elif effective_pattern:
+                logger.debug("[%s] DOM=0, pattern connu (%r) → requests fallback direct", company, effective_pattern)
                 print(f"     ↳ DOM=0, pattern connu ({effective_pattern!r}) → requests fallback direct")
             else:
+                logger.debug("[%s] DOM=0, no API, no pattern → LLM pattern discovery", company)
                 print(f"     ↳ DOM=0, aucune API JSON interceptée → LLM pattern discovery")
 
             if not effective_pattern:
                 discovered = _llm_discover_pattern(page_html, company)
+                logger.debug("[%s] LLM pattern discovery → %r", company, discovered)
             else:
                 discovered = None
             if discovered:
@@ -775,6 +795,8 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                 llm_jobs = llm_jobs_raw if validate_mode else [j for j in llm_jobs_raw if is_relevant_title(j["title"])]
                 for j in llm_jobs:
                     j["source"] = "Playwright+LLM"
+                logger.debug("[%s] LLM pattern=%r → raw=%d  filtered=%d",
+                             company, discovered, len(llm_jobs_raw), len(llm_jobs))
                 if not validate_mode and len(llm_jobs_raw) != len(llm_jobs):
                     print(f"     ↳ LLM DOM brut: {len(llm_jobs_raw)} lien(s) → {len(llm_jobs)} après filtre titre")
                     dedup = j["url"].split("?")[0].rstrip("/")
@@ -784,8 +806,10 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                 if llm_jobs:
                     pw_page.remove_listener("response", on_response)
                     continue
+                logger.debug("[%s] LLM pattern=%r but 0 jobs extracted → requests fallback", company, discovered)
                 print(f"     ↳ LLM découvert pattern={discovered!r} mais 0 job extrait → requests fallback")
             elif not effective_pattern:
+                logger.debug("[%s] LLM found no pattern → requests fallback", company)
                 print(f"     ↳ LLM n'a pas trouvé de pattern → requests fallback")
 
             # ── Étape 8 : dernier recours requests ───────────────────────────

@@ -80,15 +80,36 @@ Exception : `_validate_html` (boucle multi-URL avec `except: pass` intentionnel)
 
 ### 6. Logging — règle impérative
 
-Toujours importer le logger partagé :
+#### Log exhaustif `run.log` — règle systématique pour tout projet
+
+Chaque projet doit produire un fichier `run.log` à la racine du projet, écrasé à chaque run.
+C'est le fichier à copier-coller directement à Claude pour le diagnostic — **pas besoin de décrire le problème, le log dit tout**.
+
+**Dans le script principal** (`main()` ou équivalent) — appeler `init_run_log()` en tout premier :
+```python
+from agents.log import get_logger, init_run_log
+log_path = init_run_log()   # écrase run.log, démarre propre
+print(f"📋 Log : {log_path}")
+```
+
+**Dans chaque module** :
 ```python
 from agents.log import get_logger
 logger = get_logger("nom_du_module")
 ```
 
+**Niveau de détail exigé dans `run.log`** (DEBUG) :
+- Toutes les requêtes HTTP (URL, méthode, statut, nb résultats)
+- Toutes les décisions de parsing (quel sélecteur a matché, combien d'items avant/après filtre)
+- Toutes les valeurs intermédiaires importantes (tenant, sr_id, board_token, total/cap pagination)
+- Toutes les erreurs et fallbacks (avec URL + message d'erreur complet)
+- Résumé final (nb jobs par société, stratégie utilisée)
+
+**Console** : INFO uniquement — messages humains propres, pas de spam DEBUG.
+**Fichier** : DEBUG tout — `<project_root>/run.log`, écrasé à chaque run (pas de versioning).
+
 Ne jamais utiliser `print()` dans `agents/` pour des erreurs ou warnings silencieux.
 Utiliser `logger.debug()` pour les détails de parsing, `logger.warning()` pour les échecs.
-Les logs vont dans `tempfile.gettempdir()/scraper.log` (DEBUG) et console (INFO).
 
 ### 7. Validation schema sur les outputs LLM
 
