@@ -259,37 +259,90 @@ def _extract_location(d: dict) -> str:
     return ""
 
 
-_TOTAL_KEYS = ["total", "totalcount", "count", "nbhits", "totalresults",
-               "totalentries", "numberofresults", "totalCount", "TotalCount"]
-_LIMIT_KEYS  = ["to", "limit", "size", "pagesize", "per_page", "hitsperpage",
-                "take", "rows"]
-_OFFSET_KEYS = ["from", "offset", "skip", "start", "page"]
+_TOTAL_KEYS      = ["total", "totalcount", "count", "nbhits", "totalresults",
+                    "totalentries", "numberofresults"]
+_TOTAL_NOFILT    = ["totalcountnocondition", "totalnofilter", "grandtotal",
+                    "totalwithoutfilter", "unfilteredtotal"]
+_LIMIT_KEYS      = ["to", "limit", "size", "pagesize", "per_page", "hitsperpage",
+                    "take", "rows"]
+_OFFSET_KEYS     = ["from", "offset", "skip", "start"]
 
 
-def _total_count_from_body(body: dict) -> int | None:
-    """Retourne le total d'offres déclaré dans un body paginé, ou None."""
+def _total_count_from_body(body: dict) -> tuple[int | None, bool]:
+    """
+    Retourne (total, filtered) où :
+      - total   : nombre d'offres à récupérer
+      - filtered: True si le total "sans conditions" > TotalCount courant
+                  → signal qu'un filtre invisible est appliqué côté page
+    Priorité à la clé "no-condition" (total réel sans filtres).
+    """
     b = {k.lower(): v for k, v in body.items()}
-    for k in _TOTAL_KEYS:
-        v = b.get(k.lower())
+
+    # Total "sans filtres" (ex : TotalCountNoCondition chez RWE)
+    total_nofilt = None
+    for k in _TOTAL_NOFILT:
+        v = b.get(k)
         if isinstance(v, int) and v > 0:
-            return v
-    return None
+            total_nofilt = v
+            break
+
+    # Total "filtré" (valeur courante)
+    total_filt = None
+    for k in _TOTAL_KEYS:
+        v = b.get(k)
+        if isinstance(v, int) and v > 0:
+            total_filt = v
+            break
+
+    if total_nofilt and total_filt and total_nofilt > total_filt:
+        return total_nofilt, True   # filtre détecté, vrai total = nofilt
+    if total_nofilt:
+        return total_nofilt, False
+    if total_filt:
+        return total_filt, False
+    return None, False
 
 
 def _fetch_all_pages(url: str, method: str, req_headers: dict,
-                     post_data: str | None, total: int) -> dict | list | None:
+                     post_data: str | None, total: int,
+                     strip_filters: bool = False) -> dict | list | None:
     """
-    Re-fetche une API paginée en demandant tous les résultats d'un coup.
-    Stratégies :
-      1. POST JSON  → modifie les clés de limite/offset dans le body
-      2. GET / POST form → modifie les query params
-    Retourne le body complet, ou None si échec.
+    Re-fetche une API pour récupérer tous les résultats.
+    strip_filters=True : envoie un body minimal (pagination seule) pour
+      ignorer les filtres implicites de la page (ex: pays, catégorie).
+    Stratégies dans l'ordre :
+      0. POST minimal {From:0, To:cap} si strip_filters et POST détecté
+      1. POST JSON   — modifie limit/offset dans le body existant
+      2. GET/POST    — modifie les query params
     """
-    cap = min(total + 10, 1000)   # jamais plus de 1000 pour éviter les abus
-    # Headers nettoyés (sans Content-Length qui sera recalculé)
+    cap = min(total + 10, 1000)
     h = {k: v for k, v in req_headers.items() if k.lower() != "content-length"}
 
-    # ── Stratégie 1 : POST JSON ──────────────────────────────────────────────
+    # ── Stratégie 0 : body minimal pour strip les filtres (POST JSON) ────────
+    if strip_filters and (method == "POST" or post_data):
+        # Tente de déduire les noms de clés From/To depuis le body existant
+        offset_key, limit_key = "From", "To"
+        if post_data:
+            try:
+                orig = json.loads(post_data)
+                for k in orig:
+                    if k.lower() in {ok.lower() for ok in _OFFSET_KEYS}:
+                        offset_key = k
+                    if k.lower() in {lk.lower() for lk in _LIMIT_KEYS}:
+                        limit_key = k
+            except Exception:
+                pass
+        try:
+            minimal = {offset_key: 0, limit_key: cap}
+            r = requests.post(url, json=minimal, headers=h, timeout=20)
+            if r.status_code == 200:
+                data = r.json()
+                if _find_job_list_in_body(data):
+                    return data
+        except Exception:
+            pass
+
+    # ── Stratégie 1 : POST JSON — modifie le body existant ──────────────────
     if method == "POST" and post_data:
         try:
             payload = json.loads(post_data)
@@ -302,14 +355,14 @@ def _fetch_all_pages(url: str, method: str, req_headers: dict,
                     payload[k] = 0
                     changed = True
             if not changed:
-                payload["limit"] = cap   # best-effort
+                payload["limit"] = cap
             r = requests.post(url, json=payload, headers=h, timeout=20)
             if r.status_code == 200:
                 return r.json()
         except Exception:
             pass
 
-    # ── Stratégie 2 : GET (ou POST sans JSON body) → query params ───────────
+    # ── Stratégie 2 : query params (GET ou POST sans JSON body) ─────────────
     try:
         parsed = urlparse(url)
         params = parse_qs(parsed.query, keep_blank_values=True)
@@ -624,12 +677,15 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                 if isinstance(body, dict):
                     job_list = _find_job_list_in_body(body)
                     if job_list:
-                        total = _total_count_from_body(body)
-                        if total and total > len(job_list):
+                        total, filtered = _total_count_from_body(body)
+                        if total and (total > len(job_list) or filtered):
                             full = _fetch_all_pages(api_url, method, req_headers,
-                                                    post_data, total)
+                                                    post_data, total,
+                                                    strip_filters=filtered)
                             if full is not None:
-                                print(f"     ↳ pagination détectée ({len(job_list)}/{total}) → re-fetch: {len(_find_job_list_in_body(full) or [])} jobs")
+                                n_full = len(_find_job_list_in_body(full) or [])
+                                tag = "filtre supprimé" if filtered else "pagination"
+                                print(f"     ↳ {tag} ({len(job_list)}/{total}) → re-fetch: {n_full} jobs")
                                 effective_body = full
                 candidate_jobs = _parse_api_jobs(effective_body, company, validate_mode=validate_mode)
                 for j in candidate_jobs:
