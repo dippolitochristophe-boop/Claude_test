@@ -24,6 +24,7 @@ import sys
 import time
 import requests
 import urllib3
+from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 
 # Fix Unicode output on Windows (cp1252 → utf-8)
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
@@ -258,6 +259,81 @@ def _extract_location(d: dict) -> str:
     return ""
 
 
+_TOTAL_KEYS = ["total", "totalcount", "count", "nbhits", "totalresults",
+               "totalentries", "numberofresults", "totalCount", "TotalCount"]
+_LIMIT_KEYS  = ["to", "limit", "size", "pagesize", "per_page", "hitsperpage",
+                "take", "rows"]
+_OFFSET_KEYS = ["from", "offset", "skip", "start", "page"]
+
+
+def _total_count_from_body(body: dict) -> int | None:
+    """Retourne le total d'offres déclaré dans un body paginé, ou None."""
+    b = {k.lower(): v for k, v in body.items()}
+    for k in _TOTAL_KEYS:
+        v = b.get(k.lower())
+        if isinstance(v, int) and v > 0:
+            return v
+    return None
+
+
+def _fetch_all_pages(url: str, method: str, req_headers: dict,
+                     post_data: str | None, total: int) -> dict | list | None:
+    """
+    Re-fetche une API paginée en demandant tous les résultats d'un coup.
+    Stratégies :
+      1. POST JSON  → modifie les clés de limite/offset dans le body
+      2. GET / POST form → modifie les query params
+    Retourne le body complet, ou None si échec.
+    """
+    cap = min(total + 10, 1000)   # jamais plus de 1000 pour éviter les abus
+    # Headers nettoyés (sans Content-Length qui sera recalculé)
+    h = {k: v for k, v in req_headers.items() if k.lower() != "content-length"}
+
+    # ── Stratégie 1 : POST JSON ──────────────────────────────────────────────
+    if method == "POST" and post_data:
+        try:
+            payload = json.loads(post_data)
+            changed = False
+            for k in list(payload.keys()):
+                if k.lower() in {lk.lower() for lk in _LIMIT_KEYS}:
+                    payload[k] = cap
+                    changed = True
+                elif k.lower() in {ok.lower() for ok in _OFFSET_KEYS}:
+                    payload[k] = 0
+                    changed = True
+            if not changed:
+                payload["limit"] = cap   # best-effort
+            r = requests.post(url, json=payload, headers=h, timeout=20)
+            if r.status_code == 200:
+                return r.json()
+        except Exception:
+            pass
+
+    # ── Stratégie 2 : GET (ou POST sans JSON body) → query params ───────────
+    try:
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query, keep_blank_values=True)
+        changed = False
+        for k in list(params.keys()):
+            if k.lower() in {lk.lower() for lk in _LIMIT_KEYS}:
+                params[k] = [str(cap)]
+                changed = True
+            elif k.lower() in {ok.lower() for ok in _OFFSET_KEYS}:
+                params[k] = ["0"]
+                changed = True
+        if not changed:
+            params["limit"] = [str(cap)]
+        new_url = urlunparse(parsed._replace(query=urlencode(params, doseq=True)))
+        fn = requests.post if method == "POST" else requests.get
+        r = fn(new_url, headers=h, timeout=20)
+        if r.status_code == 200:
+            return r.json()
+    except Exception:
+        pass
+
+    return None
+
+
 def _find_job_list_in_body(body, max_depth: int = 3) -> list | None:
     """
     Cherche récursivement une liste de dicts ressemblant à des jobs.
@@ -446,7 +522,8 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                  "google", "doubleclick", "hotjar", "segment", "sentry")
 
     for page_url in site["pages"]:
-        intercepted_apis: list[tuple[str, dict | list]] = []
+        # (url, method, req_headers, post_data, response_body)
+        intercepted_apis: list[tuple[str, str, dict, str | None, dict | list]] = []
 
         def on_response(response):
             url = response.url
@@ -458,7 +535,14 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
             try:
                 body = response.json()
                 if isinstance(body, (dict, list)):
-                    intercepted_apis.append((url, body))
+                    req = response.request
+                    intercepted_apis.append((
+                        url,
+                        req.method,
+                        dict(req.headers),
+                        req.post_data,
+                        body,
+                    ))
             except Exception:
                 pass
 
@@ -534,8 +618,20 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
 
             # ── Étape 6 : DOM vide → analyse APIs interceptées ────────────────
             api_jobs = []
-            for api_url, body in intercepted_apis:
-                candidate_jobs = _parse_api_jobs(body, company, validate_mode=validate_mode)
+            for api_url, method, req_headers, post_data, body in intercepted_apis:
+                # Pagination : si total déclaré > items reçus → re-fetch complet
+                effective_body = body
+                if isinstance(body, dict):
+                    job_list = _find_job_list_in_body(body)
+                    if job_list:
+                        total = _total_count_from_body(body)
+                        if total and total > len(job_list):
+                            full = _fetch_all_pages(api_url, method, req_headers,
+                                                    post_data, total)
+                            if full is not None:
+                                print(f"     ↳ pagination détectée ({len(job_list)}/{total}) → re-fetch: {len(_find_job_list_in_body(full) or [])} jobs")
+                                effective_body = full
+                candidate_jobs = _parse_api_jobs(effective_body, company, validate_mode=validate_mode)
                 for j in candidate_jobs:
                     if j["url"].startswith("/"):
                         j["url"] = base + j["url"]
@@ -556,7 +652,7 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
             # Si effective_pattern déjà connu → skip LLM, requests fallback direct.
             if intercepted_apis:
                 print(f"     ↳ DOM=0, {len(intercepted_apis)} API(s) interceptée(s) — structures non reconnues :")
-                for api_url, body in intercepted_apis:
+                for api_url, _m, _rh, _pd, body in intercepted_apis:
                     _log_unrecognized_api(api_url, body)
             elif effective_pattern:
                 print(f"     ↳ DOM=0, pattern connu ({effective_pattern!r}) → requests fallback direct")
