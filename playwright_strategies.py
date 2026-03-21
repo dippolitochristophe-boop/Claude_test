@@ -688,6 +688,29 @@ def _apply_filter_click_seq(pw_page, company: str, seq: list[str]) -> bool:
         if not clicked:
             logger.debug("[%s] filter_click step %d: no selector matched → abort (%s)",
                          company, i + 1, selector_group[:60])
+            # Dump DOM elements for diagnosis (find the real filter selector)
+            try:
+                els = pw_page.evaluate("""() => {
+                    const nodes = document.querySelectorAll(
+                        'button, [role="button"], [class*="filter"], [class*="Filter"], '
+                        + '[class*="accordion"], details summary, h3, h4, legend, '
+                        + '[data-filter], [data-type]'
+                    );
+                    return Array.from(nodes).slice(0, 40).map(e => ({
+                        tag: e.tagName,
+                        text: (e.innerText || '').trim().slice(0, 50),
+                        cls: (e.className || '').slice(0, 60),
+                        data: Object.fromEntries(
+                            Array.from(e.attributes)
+                                .filter(a => a.name.startsWith('data-') || a.name === 'role')
+                                .map(a => [a.name, (a.value || '').slice(0, 40)])
+                        )
+                    }));
+                }""")
+                logger.debug("[%s] filter_click DOM dump (step %d): %s",
+                             company, i + 1, json.dumps(els))
+            except Exception as dump_err:
+                logger.debug("[%s] filter_click DOM dump failed: %s", company, dump_err)
             return False
     return True
 
@@ -893,7 +916,8 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                     ".load-more", ".btn-load-more", "[data-action='load-more']",
                     "[data-testid*='load-more']", "a:has-text('Load more')",
                 ]
-                max_ui_attempts = min(pagination_total // 5 + 2, 30)
+                max_ui_attempts = min(pagination_total // 9 + 2, 40)
+                total_raw_loaded = 0
                 for attempt in range(max_ui_attempts):
                     prev_intercept_count = len(intercepted_apis)
                     clicked = False
@@ -914,19 +938,27 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                             break
 
                     # Analyser les nouvelles APIs interceptées depuis le dernier passage
-                    new_jobs = []
+                    # Condition d'arrêt : raw_count==0 (plus rien chargé) — pas relevant==0
+                    # (évite de stopper trop tôt quand les jobs ne sont pas dans le profil)
+                    new_relevant = []
+                    new_raw_count = 0
                     for _, _, _, _, body in intercepted_apis[prev_intercept_count:]:
+                        job_list = _find_job_list_in_body(body) if isinstance(body, dict) else (body if isinstance(body, list) else [])
+                        if job_list:
+                            new_raw_count += len(job_list)
                         for j in _parse_api_jobs(body, company, validate_mode=validate_mode):
                             if j["url"].startswith("/"):
                                 j["url"] = base + j["url"]
-                            new_jobs.append(j)
-                    if not new_jobs:
-                        logger.debug("[%s] UI pagination attempt %d: no new jobs → stop", company, attempt + 1)
+                            new_relevant.append(j)
+                    if new_raw_count == 0:
+                        logger.debug("[%s] UI pagination attempt %d: no new raw jobs → stop", company, attempt + 1)
                         break
-                    api_jobs.extend(new_jobs)
-                    logger.debug("[%s] UI pagination attempt %d: +%d jobs (total=%d)",
-                                 company, attempt + 1, len(new_jobs), len(api_jobs))
-                    if len(api_jobs) >= pagination_total:
+                    total_raw_loaded += new_raw_count
+                    api_jobs.extend(new_relevant)
+                    logger.debug("[%s] UI pagination attempt %d: raw=%d relevant=%d (total_raw=%d/%d)",
+                                 company, attempt + 1, new_raw_count, len(new_relevant),
+                                 total_raw_loaded, pagination_total)
+                    if total_raw_loaded >= pagination_total:
                         break
                 if api_jobs:
                     logger.debug("[%s] UI pagination complete → %d jobs", company, len(api_jobs))
