@@ -19,7 +19,6 @@ import os
 import sys
 import threading
 import requests
-from queue import Queue
 
 # Fix Unicode output on Windows (cp1252 → utf-8)
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
@@ -1045,12 +1044,10 @@ def main():
         _pprint(f"🏢 {name}... {'✅ ' + str(len(jobs)) if jobs else '⚠️  0'}")
         return name, jobs
 
-    # ── Ouvrir N contextes browser pour HTML parallèle ────────────────────────
+    # ── 1 browser + 1 page pour les sites HTML (séquentiel — Playwright sync non thread-safe) ──
     playwright_ctx = None
     browser = None
-    extra_contexts: list = []
-    page_pool: Queue = Queue()
-    N_HTML_WORKERS = 3
+    pw_page = None
 
     if PLAYWRIGHT_AVAILABLE:
         try:
@@ -1058,22 +1055,11 @@ def main():
             from playwright_stealth import Stealth
             Stealth().hook_playwright_context(playwright_ctx)
             browser = playwright_ctx.chromium.launch(headless=True)
-            for _ in range(N_HTML_WORKERS):
-                ctx = browser.new_context(user_agent=HEADERS["User-Agent"])
-                page = ctx.new_page()
-                extra_contexts.append((ctx, page))
-                page_pool.put(page)
-            print(f"🌐 Browser Chromium ouvert ({N_HTML_WORKERS} contextes parallèles)\n")
+            context = browser.new_context(user_agent=HEADERS["User-Agent"])
+            pw_page = context.new_page()
+            print("🌐 Browser Chromium ouvert\n")
         except Exception as e:
             print(f"🚨 Browser fail ({str(e)[:80]}) → requests fallback pour tous\n")
-            for ctx, page in extra_contexts:
-                try:
-                    ctx.close()
-                except Exception:
-                    pass
-            extra_contexts.clear()
-            while not page_pool.empty():
-                page_pool.get_nowait()
             try:
                 if browser:
                     browser.close()
@@ -1086,29 +1072,7 @@ def main():
                 pass
             playwright_ctx = None
             browser = None
-
-    def _scrape_html(site: dict) -> tuple[str, list[dict]]:
-        name = site["name"]
-        cached = cache_get(name)
-        if cached is not None:
-            _pprint(f"🏢 {name}... 💾 {len(cached)} (cache)")
-            return name, cached
-        page = page_pool.get() if not page_pool.empty() else None
-        try:
-            logger.debug("[html] start %s  pages=%s  job_pattern=%r",
-                         name, site.get("pages", [])[:2], site.get("job_pattern"))
-            jobs = scrape_site(site, pw_page=page)
-            src = set(j["source"] for j in jobs) if jobs else set()
-            logger.debug("[html] %s → %d jobs  sources=%s", name, len(jobs), src)
-            if jobs:
-                for j in jobs[:3]:
-                    logger.debug("[html]   title=%r  loc=%r", j.get("title"), j.get("location"))
-            _pprint(f"🏢 {name}... {'✅ ' + str(len(jobs)) + ' [' + ', '.join(src) + ']' if jobs else '⚠️  0'}")
-            cache_put(name, jobs)
-            return name, jobs
-        finally:
-            if page is not None:
-                page_pool.put(page)
+            pw_page = None
 
     try:
         # ── APIs JSON — toutes en parallèle ───────────────────────────────────
@@ -1144,21 +1108,32 @@ def main():
                 all_jobs.extend(jobs)
                 summary[name] = len(jobs)
 
-        # ── Sites HTML — N_HTML_WORKERS pages en parallèle ────────────────────
+        # ── Sites HTML — séquentiel (Playwright sync non thread-safe) ───────────
         print("\n── Sites HTML ───────────────────────────────────────────────")
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=N_HTML_WORKERS) as ex:
-            for name, jobs in ex.map(_scrape_html, sites):
-                all_jobs.extend(jobs)
-                summary[name] = len(jobs)
+        for site in sites:
+            name = site["name"]
+            cached = cache_get(name)
+            if cached is not None:
+                print(f"🏢 {name}... 💾 {len(cached)} (cache)")
+                all_jobs.extend(cached)
+                summary[name] = len(cached)
+                continue
+            print(f"🏢 {name}...", end=" ", flush=True)
+            logger.debug("[html] start %s  pages=%s  job_pattern=%r",
+                         name, site.get("pages", [])[:2], site.get("job_pattern"))
+            jobs = scrape_site(site, pw_page=pw_page)
+            src = set(j["source"] for j in jobs) if jobs else set()
+            logger.debug("[html] %s → %d jobs  sources=%s", name, len(jobs), src)
+            if jobs:
+                for j in jobs[:3]:
+                    logger.debug("[html]   title=%r  loc=%r", j.get("title"), j.get("location"))
+            print(f"✅ {len(jobs)} [{', '.join(src)}]" if jobs else "⚠️  0")
+            cache_put(name, jobs)
+            all_jobs.extend(jobs)
+            summary[name] = len(jobs)
 
     finally:
-        # Fermeture de tous les contextes + browser
-        for ctx, page in extra_contexts:
-            try:
-                ctx.close()
-            except Exception:
-                pass
         if playwright_ctx:
             try:
                 if browser:
