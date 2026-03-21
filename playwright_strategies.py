@@ -86,7 +86,7 @@ JOB_LINK_PATTERNS = [
 
 JOB_LIST_KEYS   = [
     # Standards
-    "jobs", "postings", "items", "results", "content", "data",
+    "jobs", "postings", "items", "results", "Results", "content", "data",
     "jobPostings", "vacancies", "positions", "offers", "hits",
     # ATS spécifiques
     "jobList", "jobOffers", "openPositions", "requisitions",
@@ -269,6 +269,10 @@ def _log_unrecognized_api(api_url: str, body) -> None:
         print(f"         top_keys={top}  lists={lists}")
         if nested:
             print(f"         nested={nested}")
+        # Clés des items dans les listes ≥2 dicts → aide à identifier les champs titre/url
+        for k, v in body.items():
+            if isinstance(v, list) and len(v) >= 2 and isinstance(v[0], dict):
+                print(f"         {k}[0]_keys={list(v[0].keys())[:12]}")
 
 
 def _parse_api_jobs(body, company_name: str, validate_mode: bool = False) -> list[dict]:
