@@ -335,12 +335,14 @@ def _fetch_all_pages(url: str, method: str, req_headers: dict,
         try:
             minimal = {offset_key: 0, limit_key: cap}
             r = requests.post(url, json=minimal, headers=h, timeout=20)
+            print(f"     [DBG] stratégie 0 POST minimal={minimal} → HTTP {r.status_code}")
             if r.status_code == 200:
                 data = r.json()
                 if _find_job_list_in_body(data):
                     return data
-        except Exception:
-            pass
+                print(f"     [DBG] stratégie 0 OK mais job_list introuvable dans réponse")
+        except Exception as e:
+            print(f"     [DBG] stratégie 0 exception: {str(e)[:80]}")
 
     # ── Stratégie 1 : POST JSON — modifie le body existant ──────────────────
     if method == "POST" and post_data:
@@ -357,10 +359,11 @@ def _fetch_all_pages(url: str, method: str, req_headers: dict,
             if not changed:
                 payload["limit"] = cap
             r = requests.post(url, json=payload, headers=h, timeout=20)
+            print(f"     [DBG] stratégie 1 POST modifié → HTTP {r.status_code}")
             if r.status_code == 200:
                 return r.json()
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"     [DBG] stratégie 1 exception: {str(e)[:80]}")
 
     # ── Stratégie 2 : query params (GET ou POST sans JSON body) ─────────────
     try:
@@ -678,10 +681,13 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                     job_list = _find_job_list_in_body(body)
                     if job_list:
                         total, filtered = _total_count_from_body(body)
+                        print(f"     [DBG] {api_url.split('/')[-1]}: job_list={len(job_list)} total={total} filtered={filtered}")
                         if total and (total > len(job_list) or filtered):
+                            print(f"     [DBG] → re-fetch déclenché pour {api_url}")
                             full = _fetch_all_pages(api_url, method, req_headers,
                                                     post_data, total,
                                                     strip_filters=filtered)
+                            print(f"     [DBG] → _fetch_all_pages retourne: {type(full).__name__ if full is not None else 'None'}")
                             if full is not None:
                                 n_full = len(_find_job_list_in_body(full) or [])
                                 tag = "filtre supprimé" if filtered else "pagination"
