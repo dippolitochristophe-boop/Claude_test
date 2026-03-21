@@ -321,6 +321,21 @@ def _parse_api_jobs(body, company_name: str, validate_mode: bool = False) -> lis
     if not job_list:
         return []
 
+    # Debug : titres trouvés avant filtre (max 3)
+    _dbg_titles = []
+    for _item in job_list[:3]:
+        if not isinstance(_item, dict):
+            continue
+        _d = _item.get("data") if isinstance(_item.get("data"), dict) else _item
+        _dci = {k.lower(): v for k, v in _d.items()}
+        _t = _ci_get_from(_dci, JOB_TITLE_KEYS) or _heuristic_title(_d)
+        if _t:
+            _dbg_titles.append(_t)
+    if _dbg_titles:
+        print(f"     ↳ API parser: {len(job_list)} items, titres bruts ex={_dbg_titles}")
+    else:
+        print(f"     ↳ API parser: {len(job_list)} items, 0 titre extrait (clés inconnues?)")
+
     for item in job_list:
         if not isinstance(item, dict):
             continue
