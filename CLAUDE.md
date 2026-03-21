@@ -139,6 +139,26 @@ Interdire :
 Règle : si tu ajoutes un import ou une fonction, elle doit être utilisée dans le même commit.
 Si une fonction devient inutile après refactor → la supprimer dans le même commit.
 
+### 11. Tests inline obligatoires avant tout commit
+
+**Toute nouvelle fonction dans `playwright_strategies.py` ou `job_scrapper.py` DOIT être testée via Bash avant le commit.**
+
+Protocole obligatoire :
+1. Écrire les tests inline (`python -c "..."`) avec des fixtures tirées des vrais logs (corps API interceptés, HTML réels)
+2. Exécuter via `Bash` — les tests doivent passer avant de stager le fichier
+3. Seulement si ✅ → `git add` + `git commit`
+
+Ce qui est testable sans Playwright (à tester systématiquement) :
+- Fonctions pures : `_total_count_from_body`, `_find_job_list_in_body`, `_ci_get_from`, `_heuristic_title`, `_heuristic_url`, `_extract_location`, `_parse_api_jobs`, `parse_jobs_from_html`
+- Fonctions HTTP : mocker `requests` avec `unittest.mock.patch`
+
+Ce qui n'est pas testable ici (accepté sans test inline) :
+- Fonctions Playwright (`smart_scrape_site`, `_navigate`, etc.) → validées par l'utilisateur dans PyCharm
+
+**Exemples de bugs qui auraient été attrapés avec des tests :**
+- `TotalCount: 9 == len(Results): 9` → `9 > 9 = False` → pagination jamais déclenchée
+- `"Results"` non trouvé par lookup case-sensitive alors que `"results"` était dans `JOB_LIST_KEYS`
+
 ---
 
 ## Architecture Python-first — principe fondamental
