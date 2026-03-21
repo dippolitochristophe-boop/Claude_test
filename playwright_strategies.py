@@ -305,20 +305,68 @@ def _total_count_from_body(body: dict) -> tuple[int | None, bool]:
 
 def _fetch_all_pages(url: str, method: str, req_headers: dict,
                      post_data: str | None, total: int,
-                     strip_filters: bool = False) -> dict | list | None:
+                     strip_filters: bool = False,
+                     pw_page=None) -> dict | list | None:
     """
     Re-fetche une API pour récupérer tous les résultats.
-    strip_filters=True : envoie un body minimal (pagination seule) pour
-      ignorer les filtres implicites de la page (ex: pays, catégorie).
+    strip_filters=True : envoie un body minimal (pagination seule).
     Stratégies dans l'ordre :
-      0. POST minimal {From:0, To:cap} si strip_filters et POST détecté
-      1. POST JSON   — modifie limit/offset dans le body existant
-      2. GET/POST    — modifie les query params
+      0. pw_page.evaluate(fetch) — browser context (cookies + proxy) si pw_page fourni
+      1. POST JSON minimal (strip_filters) ou modifié
+      2. GET/POST query params
     """
     cap = min(total + 10, 1000)
     h = {k: v for k, v in req_headers.items() if k.lower() != "content-length"}
 
-    # ── Stratégie 0 : body minimal pour strip les filtres (POST JSON) ────────
+    # ── Stratégie 0 : browser fetch (pw_page) — contourne proxy/cookies ─────
+    if pw_page is not None:
+        try:
+            # Détermine le body à envoyer
+            offset_key, limit_key = "From", "To"
+            if post_data:
+                try:
+                    orig = json.loads(post_data)
+                    for k in orig:
+                        if k.lower() in {ok.lower() for ok in _OFFSET_KEYS}:
+                            offset_key = k
+                        if k.lower() in {lk.lower() for lk in _LIMIT_KEYS}:
+                            limit_key = k
+                except Exception:
+                    pass
+            if strip_filters:
+                fetch_body = json.dumps({offset_key: 0, limit_key: cap})
+            elif post_data:
+                try:
+                    payload = json.loads(post_data)
+                    for k in list(payload.keys()):
+                        if k.lower() in {lk.lower() for lk in _LIMIT_KEYS}:
+                            payload[k] = cap
+                        elif k.lower() in {ok.lower() for ok in _OFFSET_KEYS}:
+                            payload[k] = 0
+                    fetch_body = json.dumps(payload)
+                except Exception:
+                    fetch_body = post_data or "null"
+            else:
+                fetch_body = "null"
+
+            js = f"""
+            async () => {{
+                const r = await fetch({json.dumps(url)}, {{
+                    method: {json.dumps(method)},
+                    headers: {{"Content-Type": "application/json"}},
+                    body: {fetch_body if method == "POST" else "undefined"}
+                }});
+                if (!r.ok) return null;
+                return await r.json();
+            }}
+            """
+            data = pw_page.evaluate(js)
+            if data and _find_job_list_in_body(data):
+                return data
+        except Exception:
+            pass
+
+    # ── Stratégie 1 : body minimal pour strip les filtres (POST JSON) ────────
     if strip_filters and (method == "POST" or post_data):
         # Tente de déduire les noms de clés From/To depuis le body existant
         offset_key, limit_key = "From", "To"
@@ -335,14 +383,12 @@ def _fetch_all_pages(url: str, method: str, req_headers: dict,
         try:
             minimal = {offset_key: 0, limit_key: cap}
             r = requests.post(url, json=minimal, headers=h, timeout=20)
-            print(f"     [DBG] stratégie 0 POST minimal={minimal} → HTTP {r.status_code}")
             if r.status_code == 200:
                 data = r.json()
                 if _find_job_list_in_body(data):
                     return data
-                print(f"     [DBG] stratégie 0 OK mais job_list introuvable dans réponse")
-        except Exception as e:
-            print(f"     [DBG] stratégie 0 exception: {str(e)[:80]}")
+        except Exception:
+            pass
 
     # ── Stratégie 1 : POST JSON — modifie le body existant ──────────────────
     if method == "POST" and post_data:
@@ -359,11 +405,10 @@ def _fetch_all_pages(url: str, method: str, req_headers: dict,
             if not changed:
                 payload["limit"] = cap
             r = requests.post(url, json=payload, headers=h, timeout=20)
-            print(f"     [DBG] stratégie 1 POST modifié → HTTP {r.status_code}")
             if r.status_code == 200:
                 return r.json()
-        except Exception as e:
-            print(f"     [DBG] stratégie 1 exception: {str(e)[:80]}")
+        except Exception:
+            pass
 
     # ── Stratégie 2 : query params (GET ou POST sans JSON body) ─────────────
     try:
@@ -681,13 +726,11 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                     job_list = _find_job_list_in_body(body)
                     if job_list:
                         total, filtered = _total_count_from_body(body)
-                        print(f"     [DBG] {api_url.split('/')[-1]}: job_list={len(job_list)} total={total} filtered={filtered}")
                         if total and (total > len(job_list) or filtered):
-                            print(f"     [DBG] → re-fetch déclenché pour {api_url}")
                             full = _fetch_all_pages(api_url, method, req_headers,
                                                     post_data, total,
-                                                    strip_filters=filtered)
-                            print(f"     [DBG] → _fetch_all_pages retourne: {type(full).__name__ if full is not None else 'None'}")
+                                                    strip_filters=filtered,
+                                                    pw_page=pw_page)
                             if full is not None:
                                 n_full = len(_find_job_list_in_body(full) or [])
                                 tag = "filtre supprimé" if filtered else "pagination"
