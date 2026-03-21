@@ -14,9 +14,12 @@ ARCHITECTURE :
 """
 
 import argparse
+import concurrent.futures
 import os
 import sys
+import threading
 import requests
+from queue import Queue
 
 # Fix Unicode output on Windows (cp1252 → utf-8)
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
@@ -28,6 +31,7 @@ import urllib3
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from agents.log import get_logger, init_run_log
+from agents.jobs_cache import get as cache_get, put as cache_put
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -1022,23 +1026,54 @@ def main():
 
     all_jobs = []
     summary = {}
+    _print_lock = threading.Lock()
 
-    # ── 1 browser ouvert pour tout le run ────────────────────────────────────
+    def _pprint(*args, **kwargs):
+        with _print_lock:
+            print(*args, **kwargs)
+
+    # ── Helpers cache + scrape ────────────────────────────────────────────────
+
+    def _scrape_api(name: str, fn, *args) -> tuple[str, list[dict]]:
+        """Vérifie le cache, scrape si nécessaire, met en cache le résultat."""
+        cached = cache_get(name)
+        if cached is not None:
+            _pprint(f"🏢 {name}... 💾 {len(cached)} (cache)")
+            return name, cached
+        jobs = fn(*args)
+        cache_put(name, jobs)
+        _pprint(f"🏢 {name}... {'✅ ' + str(len(jobs)) if jobs else '⚠️  0'}")
+        return name, jobs
+
+    # ── Ouvrir N contextes browser pour HTML parallèle ────────────────────────
     playwright_ctx = None
     browser = None
-    pw_page = None
+    extra_contexts: list = []
+    page_pool: Queue = Queue()
+    N_HTML_WORKERS = 3
+
     if PLAYWRIGHT_AVAILABLE:
         try:
             playwright_ctx = sync_playwright().start()
             from playwright_stealth import Stealth
             Stealth().hook_playwright_context(playwright_ctx)
             browser = playwright_ctx.chromium.launch(headless=True)
-            context = browser.new_context(user_agent=HEADERS["User-Agent"])
-            pw_page = context.new_page()
-            print("🌐 Browser Chromium ouvert\n")
+            for _ in range(N_HTML_WORKERS):
+                ctx = browser.new_context(user_agent=HEADERS["User-Agent"])
+                page = ctx.new_page()
+                extra_contexts.append((ctx, page))
+                page_pool.put(page)
+            print(f"🌐 Browser Chromium ouvert ({N_HTML_WORKERS} contextes parallèles)\n")
         except Exception as e:
             print(f"🚨 Browser fail ({str(e)[:80]}) → requests fallback pour tous\n")
-            # Nettoyage explicite pour éviter les processus orphelins
+            for ctx, page in extra_contexts:
+                try:
+                    ctx.close()
+                except Exception:
+                    pass
+            extra_contexts.clear()
+            while not page_pool.empty():
+                page_pool.get_nowait()
             try:
                 if browser:
                     browser.close()
@@ -1051,76 +1086,79 @@ def main():
                 pass
             playwright_ctx = None
             browser = None
-            pw_page = None
 
-    try:
-        # ── APIs JSON (pas de browser nécessaire) ─────────────────────────────
-        print("── Workday API ──────────────────────────────────────────────")
-        for co in workday_cos:
-            print(f"🏢 {co['name']}...", end=" ", flush=True)
-            logger.debug("[workday] start %s  config=%s", co["name"], co)
-            jobs = scrape_workday(co)
-            logger.debug("[workday] %s → %d jobs", co["name"], len(jobs))
-            if jobs:
-                for j in jobs[:3]:
-                    logger.debug("[workday]   title=%r  loc=%r  url=%r", j.get("title"), j.get("location"), j.get("url"))
-            print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
-            all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(1)
-
-        print("\n── SmartRecruiters API ──────────────────────────────────────")
-        for co in sr_cos:
-            print(f"🏢 {co['name']}...", end=" ", flush=True)
-            logger.debug("[smartrecruiters] start %s  sr_id=%s", co["name"], co.get("sr_id"))
-            jobs = scrape_smartrecruiters(co)
-            logger.debug("[smartrecruiters] %s → %d jobs", co["name"], len(jobs))
-            print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
-            all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(1)
-
-        if run_uniper:
-            print("\n── Uniper API ───────────────────────────────────────────────")
-            print("🏢 Uniper...", end=" ", flush=True)
-            logger.debug("[uniper] start")
-            jobs = scrape_uniper()
-            logger.debug("[uniper] → %d jobs", len(jobs))
-            print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
-            all_jobs.extend(jobs); summary["Uniper"] = len(jobs)
-
-        print("\n── Greenhouse API ───────────────────────────────────────────")
-        for co in greenhouse_cos:
-            print(f"🏢 {co['name']}...", end=" ", flush=True)
-            logger.debug("[greenhouse] start %s  board_token=%s  region=%s",
-                         co["name"], co.get("board_token"), co.get("region", "us"))
-            jobs = scrape_greenhouse(co)
-            logger.debug("[greenhouse] %s → %d jobs", co["name"], len(jobs))
-            print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
-            all_jobs.extend(jobs); summary[co["name"]] = len(jobs); time.sleep(0.5)
-
-        print("\n── Oracle Taleo (TotalEnergies, Macquarie) ──────────────────")
-        for co in taleo_cos:
-            print(f"🏢 {co['name']}...", end=" ", flush=True)
-            logger.debug("[taleo] start %s", co["name"])
-            jobs = scrape_taleo(co)
-            logger.debug("[taleo] %s → %d jobs", co["name"], len(jobs))
-            print(f"✅ {len(jobs)}" if jobs else "⚠️  0")
-            all_jobs.extend(jobs); summary[co["name"]] = len(jobs)
-
-        # ── Sites HTML — même browser pour tous ───────────────────────────────
-        print("\n── Sites HTML ───────────────────────────────────────────────")
-        for site in sites:
-            print(f"🏢 {site['name']}...", end=" ", flush=True)
+    def _scrape_html(site: dict) -> tuple[str, list[dict]]:
+        name = site["name"]
+        cached = cache_get(name)
+        if cached is not None:
+            _pprint(f"🏢 {name}... 💾 {len(cached)} (cache)")
+            return name, cached
+        page = page_pool.get() if not page_pool.empty() else None
+        try:
             logger.debug("[html] start %s  pages=%s  job_pattern=%r",
-                         site["name"], site.get("pages", [])[:2], site.get("job_pattern"))
-            jobs = scrape_site(site, pw_page=pw_page)
+                         name, site.get("pages", [])[:2], site.get("job_pattern"))
+            jobs = scrape_site(site, pw_page=page)
             src = set(j["source"] for j in jobs) if jobs else set()
-            logger.debug("[html] %s → %d jobs  sources=%s", site["name"], len(jobs), src)
+            logger.debug("[html] %s → %d jobs  sources=%s", name, len(jobs), src)
             if jobs:
                 for j in jobs[:3]:
                     logger.debug("[html]   title=%r  loc=%r", j.get("title"), j.get("location"))
-            print(f"✅ {len(jobs)} [{', '.join(src)}]" if jobs else "⚠️  0")
-            all_jobs.extend(jobs); summary[site["name"]] = len(jobs); time.sleep(0.5)
+            _pprint(f"🏢 {name}... {'✅ ' + str(len(jobs)) + ' [' + ', '.join(src) + ']' if jobs else '⚠️  0'}")
+            cache_put(name, jobs)
+            return name, jobs
+        finally:
+            if page is not None:
+                page_pool.put(page)
+
+    try:
+        # ── APIs JSON — toutes en parallèle ───────────────────────────────────
+        print("── APIs (Workday / SmartRecruiters / Greenhouse / Taleo / Uniper) ──")
+
+        api_tasks: list[tuple[str, object, tuple]] = []
+        for co in workday_cos:
+            logger.debug("[workday] start %s  config=%s", co["name"], co)
+            api_tasks.append((co["name"], scrape_workday, (co,)))
+        for co in sr_cos:
+            logger.debug("[smartrecruiters] start %s  sr_id=%s", co["name"], co.get("sr_id"))
+            api_tasks.append((co["name"], scrape_smartrecruiters, (co,)))
+        for co in greenhouse_cos:
+            logger.debug("[greenhouse] start %s  board_token=%s  region=%s",
+                         co["name"], co.get("board_token"), co.get("region", "us"))
+            api_tasks.append((co["name"], scrape_greenhouse, (co,)))
+        for co in taleo_cos:
+            logger.debug("[taleo] start %s", co["name"])
+            api_tasks.append((co["name"], scrape_taleo, (co,)))
+        if run_uniper:
+            logger.debug("[uniper] start")
+            api_tasks.append(("Uniper", scrape_uniper, ()))
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+            futures = {
+                ex.submit(_scrape_api, name, fn, *args): name
+                for name, fn, args in api_tasks
+            }
+            for fut in concurrent.futures.as_completed(futures):
+                name, jobs = fut.result()
+                if name == "Uniper":
+                    logger.debug("[uniper] → %d jobs", len(jobs))
+                all_jobs.extend(jobs)
+                summary[name] = len(jobs)
+
+        # ── Sites HTML — N_HTML_WORKERS pages en parallèle ────────────────────
+        print("\n── Sites HTML ───────────────────────────────────────────────")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=N_HTML_WORKERS) as ex:
+            for name, jobs in ex.map(_scrape_html, sites):
+                all_jobs.extend(jobs)
+                summary[name] = len(jobs)
 
     finally:
-        # Fermeture browser dans tous les cas (évite les processus orphelins)
+        # Fermeture de tous les contextes + browser
+        for ctx, page in extra_contexts:
+            try:
+                ctx.close()
+            except Exception:
+                pass
         if playwright_ctx:
             try:
                 if browser:
