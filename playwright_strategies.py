@@ -86,7 +86,7 @@ JOB_LINK_PATTERNS = [
 
 JOB_LIST_KEYS   = [
     # Standards
-    "jobs", "postings", "items", "results", "Results", "content", "data",
+    "jobs", "postings", "items", "results", "content", "data",
     "jobPostings", "vacancies", "positions", "offers", "hits",
     # ATS spécifiques
     "jobList", "jobOffers", "openPositions", "requisitions",
@@ -206,10 +206,40 @@ def _wait_for_jobs_dom(page, wait_for: str | None, job_pattern: str | None = Non
     return ""
 
 
+def _ci_get_from(d_lower: dict, keys: list[str]) -> str:
+    """Lookup case-insensitive dans un dict pré-lowercased. Retourne la première valeur string non vide."""
+    for k in keys:
+        v = d_lower.get(k.lower())
+        if v and isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+
+def _heuristic_title(d: dict) -> str:
+    """Fallback titre : premier champ string 10-150 chars avec espace, sans http ni slash initial."""
+    for v in d.values():
+        if isinstance(v, str):
+            s = v.strip()
+            if 10 <= len(s) <= 150 and " " in s and not s.startswith(("http", "/")):
+                return s
+    return ""
+
+
+def _heuristic_url(d: dict) -> str:
+    """Fallback URL : premier champ string commençant par http ou /path."""
+    for v in d.values():
+        if isinstance(v, str):
+            s = v.strip()
+            if s.startswith("http") or (s.startswith("/") and len(s) > 3):
+                return s
+    return ""
+
+
 def _extract_location(d: dict) -> str:
-    """Extrait la localisation depuis un dict job API."""
+    """Extrait la localisation depuis un dict job API — lookup case-insensitive."""
+    d_lower = {k.lower(): v for k, v in d.items()}
     for k in JOB_LOC_KEYS:
-        v = d.get(k)
+        v = d_lower.get(k.lower())
         if not v:
             continue
         if isinstance(v, str) and v.strip():
@@ -231,7 +261,7 @@ def _extract_location(d: dict) -> str:
 def _find_job_list_in_body(body, max_depth: int = 3) -> list | None:
     """
     Cherche récursivement une liste de dicts ressemblant à des jobs.
-    Priorité aux clés connues, puis exploration en profondeur.
+    Lookup case-insensitive sur JOB_LIST_KEYS, puis exploration en profondeur.
     """
     if isinstance(body, list):
         if body and isinstance(body[0], dict):
@@ -239,9 +269,10 @@ def _find_job_list_in_body(body, max_depth: int = 3) -> list | None:
         return None
     if not isinstance(body, dict) or max_depth == 0:
         return None
-    # 1. Clés connues en priorité
+    # 1. Clés connues — lookup case-insensitive
+    body_lower = {k.lower(): v for k, v in body.items()}
     for k in JOB_LIST_KEYS:
-        v = body.get(k)
+        v = body_lower.get(k.lower())
         if isinstance(v, list) and v and isinstance(v[0], dict):
             return v
     # 2. Exploration récursive des valeurs dict/list
@@ -278,8 +309,8 @@ def _log_unrecognized_api(api_url: str, body) -> None:
 def _parse_api_jobs(body, company_name: str, validate_mode: bool = False) -> list[dict]:
     """
     Auto-détecte la structure d'une réponse API et extrait les jobs.
+    Tous les lookups sont case-insensitive. Heuristiques titre/url en fallback.
     validate_mode=True : désactive le filtre is_relevant_title (health-check, Agent 3).
-    Retourne une liste de dicts jobs (sans score, bucket sera calculé par l'appelant).
     """
     from job_scrapper import is_relevant_title, get_location_bucket
 
@@ -287,7 +318,6 @@ def _parse_api_jobs(body, company_name: str, validate_mode: bool = False) -> lis
     seen = set()
 
     job_list = _find_job_list_in_body(body)
-
     if not job_list:
         return []
 
@@ -298,36 +328,40 @@ def _parse_api_jobs(body, company_name: str, validate_mode: bool = False) -> lis
         # Données peuvent être dans item directement ou dans item["data"]
         d = item.get("data") if isinstance(item.get("data"), dict) else item
 
-        # Titre
-        title = ""
-        for k in JOB_TITLE_KEYS:
-            v = d.get(k) or item.get(k)
-            if v and isinstance(v, str) and v.strip():
-                title = v.strip()
-                break
+        # Vue case-insensitive (calculée une fois par item)
+        d_ci   = {k.lower(): v for k, v in d.items()}
+        item_ci = {k.lower(): v for k, v in item.items()}
+
+        # Titre — clés connues CI, puis heuristique
+        title = (_ci_get_from(d_ci, JOB_TITLE_KEYS)
+                 or _ci_get_from(item_ci, JOB_TITLE_KEYS)
+                 or _heuristic_title(d))
 
         if not title or (not validate_mode and not is_relevant_title(title)):
             continue
 
-        # URL
-        url = ""
-        for k in JOB_URL_KEYS:
-            v = d.get(k) or item.get(k)
-            if v and isinstance(v, str) and v.strip():
-                url = v.strip()
-                break
+        # URL — clés connues CI, puis heuristique
+        url = (_ci_get_from(d_ci, JOB_URL_KEYS)
+               or _ci_get_from(item_ci, JOB_URL_KEYS)
+               or _heuristic_url(d))
 
-        # ID (Algolia : objectID à la racine)
-        job_id = str(item.get("objectID") or d.get("id") or d.get("jobId") or "")
+        # ID — case-insensitive
+        job_id = str(
+            item_ci.get("objectid") or d_ci.get("id") or
+            d_ci.get("jobid") or d_ci.get("referencenumber") or ""
+        )
 
-        # Si URL relative → à compléter par l'appelant
+        # Fallback URL depuis slug + id
         if not url and job_id:
-            slug = d.get("slug") or d.get("urlSlug") or ""
+            slug = d_ci.get("slug") or d_ci.get("urlslug") or ""
             if not slug:
                 slug = re.sub(r"[^a-zA-Z0-9]+", "-", title).strip("-")
             url = f"/job/{slug}/{job_id}" if slug else f"/job/{job_id}"
 
         location = _extract_location(d) or _extract_location(item)
+
+        date = (d_ci.get("publicationdate") or d_ci.get("date") or
+                item_ci.get("updated_at") or "")[:10]
 
         dedup = job_id or url
         if dedup and dedup not in seen:
@@ -339,8 +373,7 @@ def _parse_api_jobs(body, company_name: str, validate_mode: bool = False) -> lis
                 "bucket": get_location_bucket(location),
                 "description": "",
                 "url": url,
-                "date": (d.get("publicationDate") or d.get("date") or
-                         item.get("updated_at") or "")[:10],
+                "date": date,
                 "source": "API (auto-detected)",
                 "score": 0,
             })
