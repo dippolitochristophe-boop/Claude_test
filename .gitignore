@@ -1,6 +1,7 @@
 __pycache__/
 profile.json
 .jobs_seen.json
+.jobs_cache.json
 jobs_v20_*.json
 rapport_*.html
 healthcheck.md
