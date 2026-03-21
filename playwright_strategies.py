@@ -666,6 +666,32 @@ def _llm_discover_pattern(html: str, company_name: str) -> str | None:
     return None
 
 
+def _apply_filter_click_seq(pw_page, company: str, seq: list[str]) -> bool:
+    """
+    Exécute une séquence de clics UI pour appliquer un filtre (ex: Company → S&T).
+    Chaque élément de seq peut être une chaîne de sélecteurs séparés par des virgules
+    (essayés dans l'ordre — le premier qui fonctionne suffit).
+    Retourne True si tous les steps ont réussi.
+    """
+    for i, selector_group in enumerate(seq):
+        candidates = [s.strip() for s in selector_group.split(",")]
+        clicked = False
+        for sel in candidates:
+            try:
+                pw_page.click(sel, timeout=2000)
+                _wait_stable(pw_page)
+                logger.debug("[%s] filter_click step %d: clicked %r", company, i + 1, sel)
+                clicked = True
+                break
+            except Exception:
+                continue
+        if not clicked:
+            logger.debug("[%s] filter_click step %d: no selector matched → abort (%s)",
+                         company, i + 1, selector_group[:60])
+            return False
+    return True
+
+
 def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                       validate_mode: bool = False) -> tuple[list[dict], str]:
     """
@@ -758,6 +784,22 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
             actual_url = pw_page.url
             base = f"{urlparse(actual_url).scheme}://{urlparse(actual_url).netloc}"
 
+            # ── Étape 3.6 : filtre UI (filter_click_seq) ─────────────────────
+            # Permet de sélectionner un filtre Company/Division avant de parser.
+            # Déclenche un nouvel appel API filtré intercepté dans intercepted_apis.
+            # On skip les APIs pré-filtre pour ne garder que les résultats filtrés.
+            filter_click_seq = site.get("filter_click_seq")
+            filter_start_idx = 0
+            if filter_click_seq:
+                pre_filter_idx = len(intercepted_apis)
+                ok = _apply_filter_click_seq(pw_page, company, filter_click_seq)
+                if ok:
+                    filter_start_idx = pre_filter_idx
+                    logger.debug("[%s] filter applied → skipping %d pre-filter APIs, processing from idx %d",
+                                 company, pre_filter_idx, filter_start_idx)
+                else:
+                    logger.debug("[%s] filter_click_seq failed → processing all APIs (no filter)", company)
+
             # ── Étape 3.5 : job_pattern effectif (cache → config) ─────────────
             # Cache check : 0 token. Surcharge job_pattern si LLM l'a déjà découvert.
             from agents.html_pattern_cache import get as _cache_get, put as _cache_put
@@ -799,10 +841,13 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
                 continue
 
             # ── Étape 6 : DOM vide → analyse APIs interceptées ────────────────
-            logger.debug("[%s] DOM=0 → analysing %d intercepted API(s)", company, len(intercepted_apis))
+            apis_to_process = intercepted_apis[filter_start_idx:]
+            logger.debug("[%s] DOM=0 → analysing %d intercepted API(s)%s", company,
+                         len(apis_to_process),
+                         f" (skipped {filter_start_idx} pre-filter)" if filter_start_idx else "")
             api_jobs = []
             pagination_total = 0  # total déclaré par l'API quand re-fetch a échoué
-            for api_url, method, req_headers, post_data, body in intercepted_apis:
+            for api_url, method, req_headers, post_data, body in apis_to_process:
                 logger.debug("[%s]   API %s %s  body_type=%s", company, method,
                              api_url.split("?")[0][-80:], type(body).__name__)
                 # Pagination : si total déclaré > items reçus → re-fetch complet
@@ -899,10 +944,10 @@ def smart_scrape_site(site: dict, pw_page, headers: dict = None,
             # ── Étape 7 : LLM pattern discovery ──────────────────────────────
             # Fires uniquement si DOM=0, API=0, et aucun pattern connu (cache ou config).
             # Si effective_pattern déjà connu → skip LLM, requests fallback direct.
-            if intercepted_apis:
-                logger.debug("[%s] DOM=0, %d API(s) — structures non reconnues", company, len(intercepted_apis))
-                print(f"     ↳ DOM=0, {len(intercepted_apis)} API(s) interceptée(s) — structures non reconnues :")
-                for api_url, _m, _rh, _pd, body in intercepted_apis:
+            if apis_to_process:
+                logger.debug("[%s] DOM=0, %d API(s) — structures non reconnues", company, len(apis_to_process))
+                print(f"     ↳ DOM=0, {len(apis_to_process)} API(s) interceptée(s) — structures non reconnues :")
+                for api_url, _m, _rh, _pd, body in apis_to_process:
                     _log_unrecognized_api(api_url, body)
             elif effective_pattern:
                 logger.debug("[%s] DOM=0, pattern connu (%r) → requests fallback direct", company, effective_pattern)

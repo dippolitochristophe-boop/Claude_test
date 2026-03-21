@@ -297,15 +297,19 @@ SITES = [
     {
         "name": "RWE",
         "type": "html",
-        # searchTerm= filtre côté Sitecore → réduit de 171 jobs globaux aux rôles trading/origination
-        # Multiple pages car le portail ne supporte pas OR dans searchTerm
-        "pages": [
-            "https://www.rwe.com/en/rwe-careers-portal/job-offers/?searchTerm=trader",
-            "https://www.rwe.com/en/rwe-careers-portal/job-offers/?searchTerm=origination",
-            "https://www.rwe.com/en/rwe-careers-portal/job-offers/?searchTerm=portfolio",
-        ],
+        # ?searchTerm= ignoré par Sitecore (React widget lit pas le URL param).
+        # Solution : filter_click_seq → Playwright clique Company → RWE Supply & Trading
+        # Déclenche un appel API filtré que l'on intercepte (skip les APIs pré-filtre).
+        "pages": ["https://www.rwe.com/en/rwe-careers-portal/job-offers/"],
         "job_pattern": "/job-offers/details/",
         "wait_for": "a[href*='/job-offers/details/']",  # SPA : attendre injection DOM
+        "filter_click_seq": [
+            # Step 1 : ouvrir le dropdown "Company" (plusieurs sélecteurs en fallback)
+            "button:has-text('Company'), [data-filter='Company'], label:has-text('Company')",
+            # Step 2 : sélectionner "RWE Supply & Trading"
+            "label:has-text('RWE Supply & Trading'), li:has-text('RWE Supply & Trading'), "
+            "span:has-text('RWE Supply & Trading'), input[value*='Supply']",
+        ],
     },
     # Uniper → déplacé vers scrape_uniper() (Next.js custom API /api/filter/query)
     {
