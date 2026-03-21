@@ -105,6 +105,10 @@ DOMAIN_ENERGY_GAS = ["energy", "gas", "ppa", "commodit", "origination"]
 DOMAIN_EXCLUDE = [
     "fuel oil", "crude oil", "oil trader", "lng trader", "bunker",
     "nat gas scheduler", "lpg", "middle distillate", "shipping", "site manager", "coal",
+    # Rôles opérations/construction qui matchent faussement DOMAIN_POWER × "manager"
+    "project manager", "procurement manager", "construction manager",
+    "maintenance manager", "operations manager", "plant manager",
+    "project procurement", "solar project", "wind farm technician",
 ]
 ROLE_KEYWORDS = [
     "trader", "trading", "portfolio", "origination", "risk officer", "optimizer",
@@ -297,19 +301,12 @@ SITES = [
     {
         "name": "RWE",
         "type": "html",
-        # ?searchTerm= ignoré par Sitecore (React widget lit pas le URL param).
-        # Solution : filter_click_seq → Playwright clique Company → RWE Supply & Trading
-        # Déclenche un appel API filtré que l'on intercepte (skip les APIs pré-filtre).
+        # Portail Sitecore "Jobbörse" — pas de filtre UI ni de searchTerm fonctionnel.
+        # L'API retourne les 9 jobs les plus récents du pool global (171 postes).
+        # On scan le top-9 : si RWE S&T a une offre récente, elle y apparaîtra.
         "pages": ["https://www.rwe.com/en/rwe-careers-portal/job-offers/"],
         "job_pattern": "/job-offers/details/",
-        "wait_for": "a[href*='/job-offers/details/']",  # SPA : attendre injection DOM
-        "filter_click_seq": [
-            # Step 1 : ouvrir le dropdown "Company" (plusieurs sélecteurs en fallback)
-            "button:has-text('Company'), [data-filter='Company'], label:has-text('Company')",
-            # Step 2 : sélectionner "RWE Supply & Trading"
-            "label:has-text('RWE Supply & Trading'), li:has-text('RWE Supply & Trading'), "
-            "span:has-text('RWE Supply & Trading'), input[value*='Supply']",
-        ],
+        "wait_for": "a[href*='/job-offers/details/']",
     },
     # Uniper → déplacé vers scrape_uniper() (Next.js custom API /api/filter/query)
     {
